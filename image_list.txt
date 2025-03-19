@@ -7,3 +7,4 @@ rancher/mirrored-istio-install-cni:1.24.1-distroless
 rancher/mirrored-istio-pilot:1.24.1-distroless
 rancher/mirrored-istio-proxyv2:1.24.1-distroless
 rancher/mirrored-jaegertracing-all-in-one:1.63.0
+istio/istio-base
