@@ -10,3 +10,7 @@ rancher/mirrored-jaegertracing-all-in-one:1.63.0
 docker.io/istio/proxyv2:1.15.0
 docker.io/istio/pilot:1.15.0
 quay.io/kiali/kiali:v1.45
+jimmidyson/configmap-reload:v0.5.0
+prom/prometheus:v2.34.0
+grafana/grafana:9.0.1
+docker.io/jaegertracing/all-in-one:1.35
