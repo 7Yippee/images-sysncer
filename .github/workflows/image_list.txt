@@ -1,2 +1,0 @@
-docker.io/library/nginx:latest
-docker.io/library/mysql:5.7
