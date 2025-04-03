@@ -28,6 +28,8 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y skopeo
+        # 安装 jq 用于 JSON 处理
+        sudo apt-get install -y jq
 
     # 缓存 Docker 层，提高性能
     - name: Set up Docker Buildx
@@ -35,12 +37,13 @@ jobs:
       with:
         buildkitd-flags: --debug
 
-    # 登录 Docker Hub (源镜像可能需要认证)
+    # 登录 Docker Hub (源镜像可能需要认证) - 仅当配置了密钥时执行
     - name: Login to Docker Hub
+      if: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKER_PASSWORD != '' }}
       uses: docker/login-action@v2.2.0
       with:
-        username: ${{ secrets.DOCKER_USERNAME || github.actor }}
-        password: ${{ secrets.DOCKER_PASSWORD || github.token }}
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
         logout: false
 
     # 登录 Lesso Harbor
