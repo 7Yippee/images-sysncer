@@ -1,18 +1,18 @@
 # 工作流名称
-name: Sync-Images-to-DockerHub
+name: Sync-Images-to-Lesso-Harbor
 # 工作流运行时显示名称
-run-name: ${{ github.actor }} is Sync Images to DockerHub.
+run-name: ${{ github.actor }} is Sync Images to Lesso Harbor.
 # 怎样触发工作流
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "lesso-harbor" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "lesso-harbor" ]
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# 工作流程任务（通常含有一个或多个步骤）
+# 工作流程任务（通常包含一个或多个步骤）
 jobs:
   syncimages:
     runs-on: ubuntu-latest
@@ -23,17 +23,17 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2.9.1
 
-    - name: Login to Docker Hub
+    - name: Login to Lesso Harbor
       uses: docker/login-action@v2.2.0
       with:
-        registry: registry.cn-guangzhou.aliyuncs.com
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
+        registry: harbor.prod.k8s.lesso.com
+        username: ${{ secrets.HARBOR_USERNAME }}
+        password: ${{ secrets.HARBOR_PASSWORD }}
         logout: false
         
-    - name: Use Skopeo Tools Sync Image to Docker Hub
+    - name: Use Skopeo Tools Sync Image to Lesso Harbor
       run: |
         #!/usr/bin/env bash
         while IFS= read -r image; do
-          skopeo copy "docker://$image" "docker://registry.cn-guangzhou.aliyuncs.com/yippee/$(basename "$image")"
+          skopeo copy "docker://$image" "docker://harbor.prod.k8s.lesso.com/istio/$(basename "$image")"
         done < image_list.txt
