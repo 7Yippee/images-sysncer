@@ -16,4 +16,4 @@ grafana/grafana:9.0.1
 docker.io/jaegertracing/all-in-one:1.35
 rancher/mirrored-bci-micro:15.6.24.2
 rancher/rancher
-rancher/shell
+rancher/shell:v0.4.0
