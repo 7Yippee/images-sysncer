@@ -2,13 +2,14 @@
 name: Sync-Images-to-DockerHub
 # 工作流运行时显示名称
 run-name: ${{ github.actor }} is Sync Images to DockerHub.
-# 怎样触发工作流
+
+# 触发条件
 on:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  # Allows you to run this workflow manually from the Actions tab
+  # 允许手动触发
   workflow_dispatch:
 
 # 工作流程任务
@@ -27,7 +28,7 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y skopeo
 
-    - name: Login to Docker Hub
+    - name: Login to Aliyun Registry
       uses: docker/login-action@v2.2.0
       with:
         registry: registry.cn-guangzhou.aliyuncs.com
@@ -35,49 +36,50 @@ jobs:
         password: ${{ secrets.DOCKER_PASSWORD }}
         logout: false
         
-    - name: Use Skopeo Tools Sync Image to Docker Hub
+    - name: Sync Images to Aliyun Registry
       run: |
         #!/usr/bin/env bash
         set -e
         
-        # 创建日志目录
+        # 创建日志目录和文件
         mkdir -p logs
+        touch logs/success.log logs/failed.log
         
         # 定义最大并行数
         MAX_PARALLEL=5
         
         # 处理每一行镜像
-        cat image_list.txt | grep -v "^#" | grep -v "^$" | while read -r image; do
+        cat image-list.txt | grep -v "^#" | grep -v "^$" | while read -r image; do
           # 等待，直到运行的任务少于最大并行数
           while [ $(jobs -r | wc -l) -ge $MAX_PARALLEL ]; do
             sleep 1
           done
           
-          # 提取镜像名称
-          image_name=$(basename "$image")
+          # 处理镜像名称，移除 docker.io/library/ 前缀
+          image_name=${image#docker.io/library/}
+          # 替换所有 / 为 -
+          image_name=${image_name//\//-}
           target_image="registry.cn-guangzhou.aliyuncs.com/yippee/${image_name}"
           
-          echo "Syncing: $image -> $target_image"
+          echo "$(date '+%Y-%m-%d %H:%M:%S') 开始同步: $image -> $target_image"
           
           # 后台运行同步任务
-          (skopeo copy --all "docker://$image" "docker://$target_image" && echo "Success: $image" >> logs/success.log || echo "Failed: $image" >> logs/failed.log) &
+          (skopeo copy --all "docker://$image" "docker://$target_image" && \
+           echo "$(date '+%Y-%m-%d %H:%M:%S') 成功: $image" >> logs/success.log || \
+           echo "$(date '+%Y-%m-%d %H:%M:%S') 失败: $image" >> logs/failed.log) &
         done
         
         # 等待所有后台任务完成
         wait
         
         # 输出结果统计
-        echo "== Sync Results =="
-        echo "Success: $(cat logs/success.log | wc -l)"
-        echo "Failed: $(cat logs/failed.log | wc -l)"
+        echo "============ 同步结果 ============"
+        echo "成功: $(wc -l < logs/success.log)"
+        echo "失败: $(wc -l < logs/failed.log)"
         
         # 如果有失败的，显示失败列表
-        if [ -f logs/failed.log ]; then
-          echo "Failed images:"
+        if [ -s logs/failed.log ]; then
+          echo -e "\n失败的镜像列表:"
           cat logs/failed.log
-          
-          # 可选：如果有失败则整个工作流失败
-          if [ $(cat logs/failed.log | wc -l) -gt 0 ]; then
-            exit 1
-          fi
+          exit 1
         fi
