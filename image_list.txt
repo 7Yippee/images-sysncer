@@ -9,4 +9,3 @@ rancher/mirrored-istio-proxyv2:1.24.1-distroless
 rancher/mirrored-library-busybox:1.34.1
 
 
-
