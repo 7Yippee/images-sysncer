@@ -28,7 +28,7 @@ goharbor/trivy-adapter-photon:v2.12.2
 goharbor/harbor-db:v2.12.2
 goharbor/redis-photon:v2.12.2
 goharbor/harbor-exporter:v2.12.2
-
+rancher/mirrored-library-busybox:1.34.1
 
 
 
