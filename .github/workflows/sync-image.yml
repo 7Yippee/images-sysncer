@@ -1,18 +1,16 @@
-# 工作流名称
 name: Sync-Images-to-DockerHub
-# 工作流运行时显示名称
 run-name: ${{ github.actor }} is Sync Images to DockerHub.
 
-# 触发条件
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - 'image-list.txt'
+      - '.github/workflows/sync-images.yml'
   pull_request:
     branches: [ "main" ]
-  # 允许手动触发
   workflow_dispatch:
 
-# 工作流程任务
 jobs:
   syncimages:
     runs-on: ubuntu-latest
@@ -48,26 +46,48 @@ jobs:
         # 定义最大并行数
         MAX_PARALLEL=5
         
+        echo "Starting image sync process..."
+        
         # 处理每一行镜像
-        cat image-list.txt | grep -v "^#" | grep -v "^$" | while read -r image; do
+        while IFS= read -r image || [ -n "$image" ]; do
+          # 跳过空行和注释
+          [[ -z "$image" || "$image" =~ ^#.*$ ]] && continue
+          
           # 等待，直到运行的任务少于最大并行数
           while [ $(jobs -r | wc -l) -ge $MAX_PARALLEL ]; do
             sleep 1
           done
           
-          # 处理镜像名称，移除 docker.io/library/ 前缀
-          image_name=${image#docker.io/library/}
-          # 替换所有 / 为 -
-          image_name=${image_name//\//-}
-          target_image="registry.cn-guangzhou.aliyuncs.com/yippee/${image_name}"
+          # 处理镜像名称
+          if [[ $image == docker.io/library/* ]]; then
+            # 处理官方镜像
+            image_name=${image#docker.io/library/}
+          elif [[ $image == */mirrored-* ]]; then
+            # 处理 mirrored 镜像，提取实际的镜像名称
+            image_name=$(echo "$image" | sed -E 's|.*/mirrored-(.*)|\1|')
+          else
+            # 其他镜像，保留最后一部分
+            image_name=$(basename "$image")
+          fi
+          
+          # 从 image_name 中分离标签
+          if [[ $image_name == *:* ]]; then
+            name_part=${image_name%:*}
+            tag_part=${image_name#*:}
+          else
+            name_part=$image_name
+            tag_part="latest"
+          fi
+          
+          target_image="registry.cn-guangzhou.aliyuncs.com/yippee/${name_part}:${tag_part}"
           
           echo "$(date '+%Y-%m-%d %H:%M:%S') 开始同步: $image -> $target_image"
           
           # 后台运行同步任务
           (skopeo copy --all "docker://$image" "docker://$target_image" && \
-           echo "$(date '+%Y-%m-%d %H:%M:%S') 成功: $image" >> logs/success.log || \
-           echo "$(date '+%Y-%m-%d %H:%M:%S') 失败: $image" >> logs/failed.log) &
-        done
+           echo "$(date '+%Y-%m-%d %H:%M:%S') 成功: $image -> $target_image" >> logs/success.log || \
+           echo "$(date '+%Y-%m-%d %H:%M:%S') 失败: $image -> $target_image" >> logs/failed.log) &
+        done < image-list.txt
         
         # 等待所有后台任务完成
         wait
