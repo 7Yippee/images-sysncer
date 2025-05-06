@@ -4,8 +4,6 @@ docker.io/library/mysql:5.7
 rancher/mirrored-kiali-kiali:v2.1.0
 rancher/istio-installer:1.24.1-rancher1
 rancher/mirrored-istio-install-cni:1.24.1-distroless
-rancher/mirrored-istio-pilot:1.24.1-distroless
-rancher/mirrored-istio-proxyv2:1.24.1-distroless
 rancher/mirrored-library-busybox:1.34.1
 
 
