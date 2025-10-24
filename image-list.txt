@@ -46,3 +46,5 @@ docker.io/yauritux/busybox-curl:latest
 docker.io/radial/busyboxplus:curl
 busybox:1.36
 amazon/aws-cli
+
+bitnami/postgresql:15
