@@ -1,5 +1,5 @@
 name: Sync-Images-to-DockerHub
-run-name: ${{ github.actor }} is Sync Images to DockerHub.
+run-name: ${{ github.actor }} is Syncing Images to Aliyun.
 
 on:
   push:
@@ -39,67 +39,85 @@ jobs:
         #!/usr/bin/env bash
         set -e
         
-        # 创建日志目录和文件
+        # --- 配置区域 ---
+        # 阿里云仓库地址
+        ALI_REGISTRY="registry.cn-guangzhou.aliyuncs.com"
+        # 你的命名空间 (比如 yippee)
+        ALI_NAMESPACE="yippee"
+        # 最大并发数 (建议 3-5，太高容易被封 IP)
+        MAX_PARALLEL=5
+        # ----------------
+        
+        # 创建日志目录
         mkdir -p logs
         touch logs/success.log logs/failed.log
         
-        # 定义最大并行数
-        MAX_PARALLEL=5
+        # --- 核心函数: 扁平化命名防止冲突 ---
+        # 逻辑: 移除 docker.io 前缀，然后将路径中的 / 替换为 _
+        # 例1: docker.io/bitnami/mysql:8.0 -> bitnami_mysql:8.0
+        # 例2: registry.k8s.io/sig-storage/snapshot-controller:v1 -> sig-storage_snapshot-controller:v1
+        get_flat_name() {
+            local img=$1
+            # 1. 先去掉 docker.io/library/ (官方镜像特例，直接变短)
+            local temp=${img#docker.io/library/}
+            # 2. 去掉 docker.io/ (普通 Docker Hub 镜像)
+            temp=${temp#docker.io/}
+            # 3. 去掉 registry.k8s.io/ 等域名前缀 (可选，这里我保留了域名后的路径)
+            # 如果想去掉域名保留路径，可以把下面这行解开，但为了区分源，建议不去掉域名，或者只去掉常见域名
+            # 这里我们只处理 docker.io，其他源保留域名太长了，我们用通用逻辑：
+            # 简单的策略：直接把完整字符串里的 / 全部换成 _，但去掉 docker.io/library/ 这种废话
+            
+            # 最终策略：移除常见前缀后，剩余部分 / 变 _
+            temp=$(echo "$img" | sed -e 's|^docker.io/library/||' -e 's|^docker.io/||' -e 's|^registry.k8s.io/||' -e 's|^k8s.gcr.io/||' -e 's|^gcr.io/||' -e 's|^quay.io/||')
+            
+            # 将剩余路径中的斜杠替换为下划线
+            echo "$temp" | tr '/' '_ '
+        }
+
+        echo "🚀 Starting image sync process to ${ALI_REGISTRY}/${ALI_NAMESPACE}..."
         
-        echo "Starting image sync process..."
-        
-        # 处理每一行镜像
+        # 读取镜像列表
         while IFS= read -r image || [ -n "$image" ]; do
           # 跳过空行和注释
           [[ -z "$image" || "$image" =~ ^#.*$ ]] && continue
           
-          # 等待，直到运行的任务少于最大并行数
+          # 1. 并发控制: 等待后台任务少于 MAX_PARALLEL
           while [ $(jobs -r | wc -l) -ge $MAX_PARALLEL ]; do
             sleep 1
           done
           
-          # 处理镜像名称
-          if [[ $image == docker.io/library/* ]]; then
-            # 处理官方镜像
-            image_name=${image#docker.io/library/}
-          elif [[ $image == */mirrored-* ]]; then
-            # 处理 mirrored 镜像，提取实际的镜像名称
-            image_name=$(echo "$image" | sed -E 's|.*/mirrored-(.*)|\1|')
-          else
-            # 其他镜像，保留最后一部分
-            image_name=$(basename "$image")
-          fi
+          # 2. 计算目标镜像名
+          flat_name=$(get_flat_name "$image")
+          target_image="${ALI_REGISTRY}/${ALI_NAMESPACE}/${flat_name}"
           
-          # 从 image_name 中分离标签
-          if [[ $image_name == *:* ]]; then
-            name_part=${image_name%:*}
-            tag_part=${image_name#*:}
-          else
-            name_part=$image_name
-            tag_part="latest"
-          fi
+          echo "Processing: $image -> $target_image"
           
-          target_image="registry.cn-guangzhou.aliyuncs.com/yippee/${name_part}:${tag_part}"
-          
-          echo "$(date '+%Y-%m-%d %H:%M:%S') 开始同步: $image -> $target_image"
-          
-          # 后台运行同步任务
-          (skopeo copy --all "docker://$image" "docker://$target_image" && \
-           echo "$(date '+%Y-%m-%d %H:%M:%S') 成功: $image -> $target_image" >> logs/success.log || \
-           echo "$(date '+%Y-%m-%d %H:%M:%S') 失败: $image -> $target_image" >> logs/failed.log) &
+          # 3. 后台执行同步 (Skopeo)
+          (
+            # 使用 skopeo copy 搬运，失败则记录日志
+            if skopeo copy --all --dest-creds "${{ secrets.DOCKER_USERNAME }}:${{ secrets.DOCKER_PASSWORD }}" "docker://$image" "docker://$target_image"; then
+                echo "[SUCCESS] $image -> $target_image" >> logs/success.log
+                echo "✅ $image 同步完成"
+            else
+                echo "[FAILED] $image -> $target_image" >> logs/failed.log
+                echo "❌ $image 同步失败"
+            fi
+          ) &
         done < image-list.txt
         
-        # 等待所有后台任务完成
+        # 等待所有后台任务结束
         wait
         
-        # 输出结果统计
-        echo "============ 同步结果 ============"
-        echo "成功: $(wc -l < logs/success.log)"
-        echo "失败: $(wc -l < logs/failed.log)"
+        # --- 输出统计结果 ---
+        echo "========================================"
+        echo "📊 同步结果统计:"
+        echo "✅ 成功: $(wc -l < logs/success.log)"
         
-        # 如果有失败的，显示失败列表
         if [ -s logs/failed.log ]; then
-          echo -e "\n失败的镜像列表:"
+          echo "❌ 失败: $(wc -l < logs/failed.log)"
+          echo "🔴 失败列表:"
           cat logs/failed.log
           exit 1
+        else
+          echo "🎉 全部成功!"
         fi
