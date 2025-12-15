@@ -34,10 +34,6 @@ docker.io/prom/node-exporter:latest
 docker.io/grafana/grafana:latest
 docker.io/jaegertracing/all-in-one:latest
 
-# Web服务类
-docker.io/library/nginx:alpine
-docker.io/library/haproxy:2.8-alpine
-docker.io/library/httpd:alpine
 
 # 专用工具类
 k8s.gcr.io/e2e-test-images/jessie-dnsutils:1.3
