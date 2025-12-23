@@ -8,33 +8,7 @@ libregroup/libresearch
 kbudde/rabbitmq-exporter:1.0.0
 docker.io/library/busybox:1.32
 docker.io/library/redis:6.2.13
-# 网络诊断类
-docker.io/nicolaka/netshoot:latest
-docker.io/wbitt/network-multitool:latest
-docker.io/appropriate/curl:latest
-docker.io/curlimages/curl:latest
-
-# 系统工具类
-docker.io/library/busybox:latest
-docker.io/library/alpine:3.18
-docker.io/library/ubuntu:22.04
-docker.io/library/debian:bullseye-slim
-docker.io/library/centos:7
-
-# 数据库工具类
-docker.io/library/mysql:8.0
-docker.io/library/postgres:15-alpine
-docker.io/library/redis:6.2.13
-docker.io/bitnami/mongodb:latest
-docker.io/library/adminer:latest
-
-# 监控分析类
-gcr.io/cadvisor/cadvisor:latest
-docker.io/prom/node-exporter:latest
-docker.io/grafana/grafana:latest
-docker.io/jaegertracing/all-in-one:latest
-
-
+apache/seatunnel-web:latest
 # 专用工具类
 docker.io/yauritux/busybox-curl:latest
 docker.io/radial/busyboxplus:curl
