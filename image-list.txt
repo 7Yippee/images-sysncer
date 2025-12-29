@@ -11,4 +11,4 @@ busybox:1.36
 amazon/aws-cli
 registry.k8s.io/sig-storage/snapshot-controller:v6.3.3
 registry.k8s.io/sig-storage/snapshot-controller:v4.0.0
-apache/seatunnel:2.3.3
+apache/seatunnel:2.3.8
