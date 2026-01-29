@@ -42,10 +42,10 @@ jobs:
         # --- 配置区域 ---
         # 阿里云仓库地址
         ALI_REGISTRY="registry.cn-guangzhou.aliyuncs.com"
-        # 你的命名空间 (比如 yippee)
-        ALI_NAMESPACE="yippee"
+        # 你的命名空间 (比如 tools_y)
+        ALI_NAMESPACE="tools_y"
         # 最大并发数 (建议 3-5，太高容易被封 IP)
-        MAX_PARALLEL=5
+        MAX_PARALLEL=8
         # ----------------
         
         # 创建日志目录
