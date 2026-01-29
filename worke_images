@@ -1,0 +1,20 @@
+---
+
+### 🚀 推送到 `yippee_w` 的标准操作
+
+#### 第一组：推送 seatunnel-web
+# 1. 改写快递单
+docker tag harbor.prod.k8s.lesso.com/tools/seatunnel-web:1.0.2-fix2 registry.cn-guangzhou.aliyuncs.com/yippee_w/seatunnel-web:1.0.2-fix2
+
+# 2. 发货
+docker push registry.cn-guangzhou.aliyuncs.com/yippee_w/seatunnel-web:1.0.2-fix2
+
+
+#### 第二组：推送 apache_seatunnel
+# 1. 改写快递单
+docker tag harbor.prod.k8s.lesso.com/tools/apache_seatunnel:2.3.8 registry.cn-guangzhou.aliyuncs.com/yippee_w/apache_seatunnel:2.3.8
+
+# 2. 发货
+docker push registry.cn-guangzhou.aliyuncs.com/yippee_w/apache_seatunnel:2.3.8
+
+
