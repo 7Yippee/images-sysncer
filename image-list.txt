@@ -10,3 +10,7 @@ registry.k8s.io/sig-storage/snapshot-controller:v6.3.3
 registry.k8s.io/sig-storage/snapshot-controller:v4.0.0
 apache/seatunnel:2.3.8
 ccr.ccs.tencentyun.com/looloodebug/looloodebug
+
+# 02-headscale-self-hosted
+tailscale/tailscale:v1.94.2
+headscale/headscale:v0.28.0

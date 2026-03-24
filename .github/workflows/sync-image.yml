@@ -1,123 +1,271 @@
-name: Sync-Images-to-DockerHub
-run-name: ${{ github.actor }} is Syncing Images to Aliyun.
+name: Sync Images to Aliyun
+run-name: ${{ github.actor }} syncs images to Aliyun
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
     paths:
-      - 'image-list.txt'
-      - '.github/workflows/sync-images.yml'
+      - image-list.txt
+      - .github/workflows/sync-image.yml
   pull_request:
-    branches: [ "main" ]
+    branches:
+      - main
+    paths:
+      - image-list.txt
+      - .github/workflows/sync-image.yml
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-images-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ALI_REGISTRY: registry.cn-guangzhou.aliyuncs.com
+  ALI_NAMESPACE: tools_y
+  MAX_PARALLEL: "4"
+  RETRY_TIMES: "3"
+  IMAGE_LIST_FILE: image-list.txt
+
 jobs:
-  syncimages:
+  validate:
+    name: Validate image list
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout Repos
-      uses: actions/checkout@v3
-      
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2.9.1
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Install Skopeo
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y skopeo
+      - name: Validate image-list.txt
+        shell: bash
+        run: |
+          set -euo pipefail
 
-    - name: Login to Aliyun Registry
-      uses: docker/login-action@v2.2.0
-      with:
-        registry: registry.cn-guangzhou.aliyuncs.com
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
-        logout: false
-        
-    - name: Sync Images to Aliyun Registry
-      run: |
-        #!/usr/bin/env bash
-        set -e
-        
-        # --- 配置区域 ---
-        # 阿里云仓库地址
-        ALI_REGISTRY="registry.cn-guangzhou.aliyuncs.com"
-        # 你的命名空间 (比如 tools_y)
-        ALI_NAMESPACE="tools_y"
-        # 最大并发数 (建议 3-5，太高容易被封 IP)
-        MAX_PARALLEL=8
-        # ----------------
-        
-        # 创建日志目录
-        mkdir -p logs
-        touch logs/success.log logs/failed.log
-        
-        # --- 核心函数: 扁平化命名防止冲突 ---
-        # 逻辑: 移除 docker.io 前缀，然后将路径中的 / 替换为 _
-        # 例1: docker.io/bitnami/mysql:8.0 -> bitnami_mysql:8.0
-        # 例2: registry.k8s.io/sig-storage/snapshot-controller:v1 -> sig-storage_snapshot-controller:v1
-        get_flat_name() {
-            local img=$1
-            # 1. 先去掉 docker.io/library/ (官方镜像特例，直接变短)
-            local temp=${img#docker.io/library/}
-            # 2. 去掉 docker.io/ (普通 Docker Hub 镜像)
-            temp=${temp#docker.io/}
-            # 3. 去掉 registry.k8s.io/ 等域名前缀 (可选，这里我保留了域名后的路径)
-            # 如果想去掉域名保留路径，可以把下面这行解开，但为了区分源，建议不去掉域名，或者只去掉常见域名
-            # 这里我们只处理 docker.io，其他源保留域名太长了，我们用通用逻辑：
-            # 简单的策略：直接把完整字符串里的 / 全部换成 _，但去掉 docker.io/library/ 这种废话
-            
-            # 最终策略：移除常见前缀后，剩余部分 / 变 _
-            temp=$(echo "$img" | sed -e 's|^docker.io/library/||' -e 's|^docker.io/||' -e 's|^registry.k8s.io/||' -e 's|^k8s.gcr.io/||' -e 's|^gcr.io/||' -e 's|^quay.io/||')
-            
-            # 将剩余路径中的斜杠替换为下划线
-            echo "$temp" | tr '/' '_ '
-        }
+          if [[ ! -f "${IMAGE_LIST_FILE}" ]]; then
+            echo "Missing ${IMAGE_LIST_FILE}"
+            exit 1
+          fi
 
-        echo "🚀 Starting image sync process to ${ALI_REGISTRY}/${ALI_NAMESPACE}..."
-        
-        # 读取镜像列表
-        while IFS= read -r image || [ -n "$image" ]; do
-          # 跳过空行和注释
-          [[ -z "$image" || "$image" =~ ^#.*$ ]] && continue
-          
-          # 1. 并发控制: 等待后台任务少于 MAX_PARALLEL
-          while [ $(jobs -r | wc -l) -ge $MAX_PARALLEL ]; do
-            sleep 1
-          done
-          
-          # 2. 计算目标镜像名
-          flat_name=$(get_flat_name "$image")
-          target_image="${ALI_REGISTRY}/${ALI_NAMESPACE}/${flat_name}"
-          
-          echo "Processing: $image -> $target_image"
-          
-          # 3. 后台执行同步 (Skopeo)
-          (
-            # 使用 skopeo copy 搬运，失败则记录日志
-            if skopeo copy --all --dest-creds "${{ secrets.DOCKER_USERNAME }}:${{ secrets.DOCKER_PASSWORD }}" "docker://$image" "docker://$target_image"; then
-                echo "[SUCCESS] $image -> $target_image" >> logs/success.log
-                echo "✅ $image 同步完成"
-            else
-                echo "[FAILED] $image -> $target_image" >> logs/failed.log
-                echo "❌ $image 同步失败"
+          invalid=0
+          line_no=0
+
+          while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+            line_no=$((line_no + 1))
+            line="${raw_line#"${raw_line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+
+            [[ -z "$line" || "$line" =~ ^# ]] && continue
+
+            if [[ "$line" =~ [[:space:]] ]]; then
+              echo "Line ${line_no}: image reference contains spaces -> $line"
+              invalid=1
+              continue
             fi
-          ) &
-        done < image-list.txt
-        
-        # 等待所有后台任务结束
-        wait
-        
-        # --- 输出统计结果 ---
-        echo "========================================"
-        echo "📊 同步结果统计:"
-        echo "✅ 成功: $(wc -l < logs/success.log)"
-        
-        if [ -s logs/failed.log ]; then
-          echo "❌ 失败: $(wc -l < logs/failed.log)"
-          echo "🔴 失败列表:"
-          cat logs/failed.log
-          exit 1
-        else
-          echo "🎉 全部成功!"
-        fi
+
+            if [[ "$line" =~ [A-Z] ]]; then
+              echo "Line ${line_no}: image reference contains uppercase characters -> $line"
+              invalid=1
+            fi
+          done < "${IMAGE_LIST_FILE}"
+
+          if [[ "$invalid" -ne 0 ]]; then
+            echo "image-list.txt validation failed"
+            exit 1
+          fi
+
+          echo "image-list.txt validation passed"
+
+  sync:
+    name: Sync images
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 180
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install skopeo
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+
+      - name: Login to Aliyun Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ALI_REGISTRY }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          logout: false
+
+      - name: Sync images to Aliyun Registry
+        shell: bash
+        env:
+          DEST_CREDS: ${{ secrets.DOCKER_USERNAME }}:${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          set -Eeuo pipefail
+
+          mkdir -p logs
+          : > logs/success.log
+          : > logs/failed.log
+          : > logs/skipped.log
+
+          normalize_source_image() {
+            local image="$1"
+            local image_without_suffix
+            local first_part
+
+            if [[ "$image" == *"@sha256:"* ]]; then
+              image_without_suffix="${image%@sha256:*}"
+              first_part="${image_without_suffix%%/*}"
+
+              if [[ "$image_without_suffix" != *"/"* ]]; then
+                echo "docker.io/library/${image}"
+              elif [[ "$first_part" == *"."* || "$first_part" == *":"* || "$first_part" == "localhost" ]]; then
+                echo "$image"
+              else
+                echo "docker.io/${image}"
+              fi
+
+              return 0
+            fi
+
+            if [[ "$image" != *":"* || "${image##*/}" != *":"* ]]; then
+              image="${image}:latest"
+            fi
+
+            image_without_suffix="${image%:*}"
+            first_part="${image_without_suffix%%/*}"
+
+            if [[ "$image_without_suffix" != *"/"* ]]; then
+              echo "docker.io/library/${image}"
+            elif [[ "$first_part" == *"."* || "$first_part" == *":"* || "$first_part" == "localhost" ]]; then
+              echo "$image"
+            else
+              echo "docker.io/${image}"
+            fi
+          }
+
+          flatten_image_name() {
+            local image="$1"
+            local normalized
+            local name_part
+            local suffix
+
+            normalized="$(normalize_source_image "$image")"
+
+            if [[ "$normalized" == *"@sha256:"* ]]; then
+              name_part="${normalized%@sha256:*}"
+              suffix="@${normalized##*@}"
+            else
+              name_part="${normalized%:*}"
+              suffix=":${normalized##*:}"
+            fi
+
+            name_part="$(echo "$name_part" | tr '/:' '__' | tr '.' '-')"
+            echo "${name_part}${suffix}"
+          }
+
+          target_exists() {
+            local target_image="$1"
+            skopeo inspect --creds "${DEST_CREDS}" "docker://${target_image}" >/dev/null 2>&1
+          }
+
+          copy_with_retry() {
+            local source_image="$1"
+            local target_image="$2"
+            local attempt=1
+
+            while (( attempt <= RETRY_TIMES )); do
+              echo "Attempt ${attempt}/${RETRY_TIMES}: ${source_image} -> ${target_image}"
+              if skopeo copy --all --dest-creds "${DEST_CREDS}" "docker://${source_image}" "docker://${target_image}"; then
+                return 0
+              fi
+              attempt=$((attempt + 1))
+              sleep 3
+            done
+
+            return 1
+          }
+
+          process_one_image() {
+            local original_image="$1"
+            local source_image
+            local flat_name
+            local target_image
+
+            source_image="$(normalize_source_image "$original_image")"
+            flat_name="$(flatten_image_name "$original_image")"
+            target_image="${ALI_REGISTRY}/${ALI_NAMESPACE}/${flat_name}"
+
+            echo "Processing: ${source_image} -> ${target_image}"
+
+            if target_exists "${target_image}"; then
+              echo "[SKIPPED] ${source_image} -> ${target_image}" >> logs/skipped.log
+              echo "⏭️  Target already exists: ${target_image}"
+              return 0
+            fi
+
+            if copy_with_retry "${source_image}" "${target_image}"; then
+              echo "[SUCCESS] ${source_image} -> ${target_image}" >> logs/success.log
+              echo "✅ Sync success: ${source_image}"
+            else
+              echo "[FAILED] ${source_image} -> ${target_image}" >> logs/failed.log
+              echo "❌ Sync failed: ${source_image}"
+              return 1
+            fi
+          }
+
+          export -f normalize_source_image flatten_image_name target_exists copy_with_retry process_one_image
+          export ALI_REGISTRY ALI_NAMESPACE DEST_CREDS RETRY_TIMES
+
+          pids=()
+
+          while IFS= read -r image || [[ -n "$image" ]]; do
+            [[ -z "$image" || "$image" =~ ^[[:space:]]*# ]] && continue
+
+            while (( $(jobs -r | wc -l) >= MAX_PARALLEL )); do
+              sleep 1
+            done
+
+            process_one_image "$image" &
+            pids+=("$!")
+          done < "${IMAGE_LIST_FILE}"
+
+          wait_failed=0
+          for pid in "${pids[@]}"; do
+            if ! wait "$pid"; then
+              wait_failed=1
+            fi
+          done
+
+          {
+            echo "## Sync Summary"
+            echo ""
+            echo "- Success: $(wc -l < logs/success.log || echo 0)"
+            echo "- Skipped: $(wc -l < logs/skipped.log || echo 0)"
+            echo "- Failed: $(wc -l < logs/failed.log || echo 0)"
+            echo ""
+
+            if [[ -s logs/failed.log ]]; then
+              echo "### Failed"
+              echo '```text'
+              cat logs/failed.log
+              echo '```'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [[ -s logs/failed.log || "$wait_failed" -ne 0 ]]; then
+            exit 1
+          fi
+
+      - name: Upload sync logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-logs
+          path: logs/
