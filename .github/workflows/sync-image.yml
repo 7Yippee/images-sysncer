@@ -113,37 +113,23 @@ jobs:
           : > logs/success.log
           : > logs/failed.log
           : > logs/skipped.log
+          mkdir -p logs/parts
 
           normalize_source_image() {
             local image="$1"
-            local image_without_suffix
-            local first_part
+            local ref
 
             if [[ "$image" == *"@sha256:"* ]]; then
-              image_without_suffix="${image%@sha256:*}"
-              first_part="${image_without_suffix%%/*}"
-
-              if [[ "$image_without_suffix" != *"/"* ]]; then
-                echo "docker.io/library/${image}"
-              elif [[ "$first_part" == *"."* || "$first_part" == *":"* || "$first_part" == "localhost" ]]; then
-                echo "$image"
-              else
-                echo "docker.io/${image}"
-              fi
-
-              return 0
+              ref="${image%@sha256:*}"
+            else
+              [[ "${image##*/}" != *":"* ]] && image="${image}:latest"
+              ref="${image%:*}"
             fi
 
-            if [[ "$image" != *":"* || "${image##*/}" != *":"* ]]; then
-              image="${image}:latest"
-            fi
-
-            image_without_suffix="${image%:*}"
-            first_part="${image_without_suffix%%/*}"
-
-            if [[ "$image_without_suffix" != *"/"* ]]; then
+            local first="${ref%%/*}"
+            if [[ "$ref" != *"/"* ]]; then
               echo "docker.io/library/${image}"
-            elif [[ "$first_part" == *"."* || "$first_part" == *":"* || "$first_part" == "localhost" ]]; then
+            elif [[ "$first" == *"."* || "$first" == *":"* || "$first" == "localhost" ]]; then
               echo "$image"
             else
               echo "docker.io/${image}"
@@ -151,12 +137,9 @@ jobs:
           }
 
           flatten_image_name() {
-            local image="$1"
-            local normalized
+            local normalized="$1"
             local name_part
             local suffix
-
-            normalized="$(normalize_source_image "$image")"
 
             if [[ "$normalized" == *"@sha256:"* ]]; then
               name_part="${normalized%@sha256:*}"
@@ -166,7 +149,7 @@ jobs:
               suffix=":${normalized##*:}"
             fi
 
-            name_part="$(echo "$name_part" | tr '/:' '__' | tr '.' '-')"
+            name_part="$(echo "$name_part" | tr '/' '_' | tr ':' '_')"
             echo "${name_part}${suffix}"
           }
 
@@ -186,7 +169,7 @@ jobs:
                 return 0
               fi
               attempt=$((attempt + 1))
-              sleep 3
+              sleep $((attempt * 3))
             done
 
             return 1
@@ -199,22 +182,22 @@ jobs:
             local target_image
 
             source_image="$(normalize_source_image "$original_image")"
-            flat_name="$(flatten_image_name "$original_image")"
+            flat_name="$(flatten_image_name "$source_image")"
             target_image="${ALI_REGISTRY}/${ALI_NAMESPACE}/${flat_name}"
 
             echo "Processing: ${source_image} -> ${target_image}"
 
             if target_exists "${target_image}"; then
-              echo "[SKIPPED] ${source_image} -> ${target_image}" >> logs/skipped.log
+              echo "[SKIPPED] ${source_image} -> ${target_image}" >> "logs/parts/skipped_${BASHPID}.log"
               echo "⏭️  Target already exists: ${target_image}"
               return 0
             fi
 
             if copy_with_retry "${source_image}" "${target_image}"; then
-              echo "[SUCCESS] ${source_image} -> ${target_image}" >> logs/success.log
+              echo "[SUCCESS] ${source_image} -> ${target_image}" >> "logs/parts/success_${BASHPID}.log"
               echo "✅ Sync success: ${source_image}"
             else
-              echo "[FAILED] ${source_image} -> ${target_image}" >> logs/failed.log
+              echo "[FAILED] ${source_image} -> ${target_image}" >> "logs/parts/failed_${BASHPID}.log"
               echo "❌ Sync failed: ${source_image}"
               return 1
             fi
@@ -223,32 +206,20 @@ jobs:
           export -f normalize_source_image flatten_image_name target_exists copy_with_retry process_one_image
           export ALI_REGISTRY ALI_NAMESPACE DEST_CREDS RETRY_TIMES
 
-          pids=()
+          grep -v '^\s*#' "${IMAGE_LIST_FILE}" | grep -v '^\s*$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | \
+            xargs -P "${MAX_PARALLEL}" -I{} bash -c 'process_one_image "$@"' _ {} || true
 
-          while IFS= read -r image || [[ -n "$image" ]]; do
-            [[ -z "$image" || "$image" =~ ^[[:space:]]*# ]] && continue
-
-            while (( $(jobs -r | wc -l) >= MAX_PARALLEL )); do
-              sleep 1
-            done
-
-            process_one_image "$image" &
-            pids+=("$!")
-          done < "${IMAGE_LIST_FILE}"
-
-          wait_failed=0
-          for pid in "${pids[@]}"; do
-            if ! wait "$pid"; then
-              wait_failed=1
-            fi
-          done
+          # Merge per-process logs
+          cat logs/parts/success_*.log >> logs/success.log 2>/dev/null || true
+          cat logs/parts/failed_*.log >> logs/failed.log 2>/dev/null || true
+          cat logs/parts/skipped_*.log >> logs/skipped.log 2>/dev/null || true
 
           {
             echo "## Sync Summary"
             echo ""
-            echo "- Success: $(wc -l < logs/success.log || echo 0)"
-            echo "- Skipped: $(wc -l < logs/skipped.log || echo 0)"
-            echo "- Failed: $(wc -l < logs/failed.log || echo 0)"
+            echo "- Success: $(wc -l < logs/success.log)"
+            echo "- Skipped: $(wc -l < logs/skipped.log)"
+            echo "- Failed: $(wc -l < logs/failed.log)"
             echo ""
 
             if [[ -s logs/failed.log ]]; then
@@ -259,7 +230,7 @@ jobs:
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
-          if [[ -s logs/failed.log || "$wait_failed" -ne 0 ]]; then
+          if [[ -s logs/failed.log ]]; then
             exit 1
           fi
 
