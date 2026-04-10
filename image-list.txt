@@ -14,3 +14,4 @@ ccr.ccs.tencentyun.com/looloodebug/looloodebug
 # 02-headscale-self-hosted
 tailscale/tailscale:v1.94.2
 headscale/headscale:v0.28.0
+eclipse-temurin:21-jdk
