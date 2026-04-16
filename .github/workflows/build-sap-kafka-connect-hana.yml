@@ -1,0 +1,152 @@
+name: Build SAP Kafka Connect HANA Image
+run-name: ${{ github.actor }} builds SAP Kafka Connect HANA image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build-sap-kafka-connect-hana.yml
+      - custom-images/sap-kafka-connect-hana/**
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build-sap-kafka-connect-hana.yml
+      - custom-images/sap-kafka-connect-hana/**
+  workflow_dispatch:
+    inputs:
+      push_latest:
+        description: "Also push the latest tag"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  ALI_REGISTRY: registry.cn-guangzhou.aliyuncs.com
+  ALI_NAMESPACE: tools_y
+  BUILD_DIR: custom-images/sap-kafka-connect-hana
+
+jobs:
+  build:
+    name: Build and publish image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Load image versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "${BUILD_DIR}/versions.env"
+
+          echo "BASE_IMAGE=${BASE_IMAGE}" >> "${GITHUB_ENV}"
+          echo "IMAGE_REPO=${IMAGE_REPO}" >> "${GITHUB_ENV}"
+          echo "CONNECTOR_VERSION=${CONNECTOR_VERSION}" >> "${GITHUB_ENV}"
+          echo "SCALA_BINARY=${SCALA_BINARY}" >> "${GITHUB_ENV}"
+          echo "NGDBC_VERSION=${NGDBC_VERSION}" >> "${GITHUB_ENV}"
+          echo "GUAVA_VERSION=${GUAVA_VERSION}" >> "${GITHUB_ENV}"
+
+      - name: Download connector artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "${BUILD_DIR}/target"
+
+          curl -fL \
+            -o "${BUILD_DIR}/target/kafka-connector-hana_${SCALA_BINARY}-${CONNECTOR_VERSION}.jar" \
+            "https://github.com/SAP/kafka-connect-sap/releases/download/${CONNECTOR_VERSION}/kafka-connector-hana_${SCALA_BINARY}-${CONNECTOR_VERSION}.jar"
+
+          curl -fL \
+            -o "${BUILD_DIR}/target/ngdbc-${NGDBC_VERSION}.jar" \
+            "https://repo1.maven.org/maven2/com/sap/cloud/db/jdbc/ngdbc/${NGDBC_VERSION}/ngdbc-${NGDBC_VERSION}.jar"
+
+          curl -fL \
+            -o "${BUILD_DIR}/target/guava-${GUAVA_VERSION}.jar" \
+            "https://repo1.maven.org/maven2/com/google/guava/guava/${GUAVA_VERSION}/guava-${GUAVA_VERSION}.jar"
+
+          ls -lh "${BUILD_DIR}/target"
+
+      - name: Set image tags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          image_base="${ALI_REGISTRY}/${ALI_NAMESPACE}/${IMAGE_REPO}"
+          version_tag="${image_base}:${CONNECTOR_VERSION}"
+
+          echo "IMAGE_BASE=${image_base}" >> "${GITHUB_ENV}"
+          echo "VERSION_TAG=${version_tag}" >> "${GITHUB_ENV}"
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            push_latest="${{ github.event.inputs.push_latest }}"
+          else
+            push_latest="true"
+          fi
+
+          echo "PUSH_LATEST=${push_latest}" >> "${GITHUB_ENV}"
+
+      - name: Login to Aliyun Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ALI_REGISTRY }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          logout: false
+
+      - name: Build image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build "${BUILD_DIR}" \
+            --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
+            -t "${VERSION_TAG}"
+
+      - name: Tag latest image
+        if: env.PUSH_LATEST == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker tag "${VERSION_TAG}" "${IMAGE_BASE}:latest"
+
+      - name: Push version tag
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "${VERSION_TAG}"
+
+      - name: Push latest tag
+        if: github.event_name != 'pull_request' && env.PUSH_LATEST == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "${IMAGE_BASE}:latest"
+
+      - name: Publish workflow summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## SAP Kafka Connect HANA Image"
+            echo
+            echo "- Base image: \`${BASE_IMAGE}\`"
+            echo "- Connector version: \`${CONNECTOR_VERSION}\`"
+            echo "- Scala binary: \`${SCALA_BINARY}\`"
+            echo "- Version tag: \`${VERSION_TAG}\`"
+            if [[ "${PUSH_LATEST}" == "true" ]]; then
+              echo "- Latest tag: \`${IMAGE_BASE}:latest\`"
+            fi
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              echo "- Push mode: skipped on pull request"
+            else
+              echo "- Push mode: enabled"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
