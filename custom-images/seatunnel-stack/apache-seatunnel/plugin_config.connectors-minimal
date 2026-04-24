@@ -1,0 +1,3 @@
+--connectors-v2--
+connector-jdbc
+connector-starrocks

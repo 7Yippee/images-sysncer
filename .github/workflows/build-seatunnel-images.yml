@@ -1,0 +1,343 @@
+name: Build SeaTunnel Images
+run-name: ${{ github.actor }} builds SeaTunnel images
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build-seatunnel-images.yml
+      - custom-images/seatunnel-stack/**
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build-seatunnel-images.yml
+      - custom-images/seatunnel-stack/**
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Which image to build"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - seatunnel
+          - seatunnel_hana
+          - seatunnel_hana_jdbcplus
+          - seatunnel_web
+          - seatunnel_web_jdbcplus
+          - seatunnel_web_jdbcplus_hana
+      push_latest:
+        description: "Also push the latest tag"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  ALI_REGISTRY: registry.cn-guangzhou.aliyuncs.com
+  ALI_NAMESPACE: tools_y
+
+jobs:
+  build:
+    name: Build ${{ matrix.id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: seatunnel
+            build_dir: custom-images/seatunnel-stack/apache-seatunnel
+          - id: seatunnel_hana
+            build_dir: custom-images/seatunnel-stack/apache-seatunnel-hana
+          - id: seatunnel_hana_jdbcplus
+            build_dir: custom-images/seatunnel-stack/apache-seatunnel-hana-jdbcplus
+          - id: seatunnel_web
+            build_dir: custom-images/seatunnel-stack/seatunnel-web
+          - id: seatunnel_web_jdbcplus
+            build_dir: custom-images/seatunnel-stack/seatunnel-web-jdbcplus
+          - id: seatunnel_web_jdbcplus_hana
+            build_dir: custom-images/seatunnel-stack/seatunnel-web-jdbcplus-hana
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all' || github.event.inputs.target == matrix.id
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Load image versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          build_dir="${{ matrix.build_dir }}"
+          source "${build_dir}/versions.env"
+
+          echo "BUILD_DIR=${build_dir}" >> "${GITHUB_ENV}"
+          echo "JAVA_IMAGE=${JAVA_IMAGE}" >> "${GITHUB_ENV}"
+          echo "IMAGE_REPO=${IMAGE_REPO}" >> "${GITHUB_ENV}"
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> "${GITHUB_ENV}"
+          echo "VERSION_STRATEGY=${VERSION_STRATEGY}" >> "${GITHUB_ENV}"
+
+          if [[ -n "${SEATUNNEL_VERSION:-}" ]]; then
+            echo "SEATUNNEL_VERSION=${SEATUNNEL_VERSION}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${SEATUNNEL_DIR:-}" ]]; then
+            echo "SEATUNNEL_DIR=${SEATUNNEL_DIR}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${SEATUNNEL_PACKAGE_URL:-}" ]]; then
+            echo "SEATUNNEL_PACKAGE_URL=${SEATUNNEL_PACKAGE_URL}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${SEATUNNEL_WEB_VERSION:-}" ]]; then
+            echo "SEATUNNEL_WEB_VERSION=${SEATUNNEL_WEB_VERSION}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${SEATUNNEL_WEB_DIR:-}" ]]; then
+            echo "SEATUNNEL_WEB_DIR=${SEATUNNEL_WEB_DIR}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${SEATUNNEL_WEB_PACKAGE_URL:-}" ]]; then
+            echo "SEATUNNEL_WEB_PACKAGE_URL=${SEATUNNEL_WEB_PACKAGE_URL}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${WEB_SOURCE_MODE:-}" ]]; then
+            echo "WEB_SOURCE_MODE=${WEB_SOURCE_MODE}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${WEB_SOURCE_REPO:-}" ]]; then
+            echo "WEB_SOURCE_REPO=${WEB_SOURCE_REPO}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${WEB_SOURCE_TAG:-}" ]]; then
+            echo "WEB_SOURCE_TAG=${WEB_SOURCE_TAG}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${WEB_SOURCE_PATCH:-}" ]]; then
+            echo "WEB_SOURCE_PATCH=${WEB_SOURCE_PATCH}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${NGDBC_VERSION:-}" ]]; then
+            echo "NGDBC_VERSION=${NGDBC_VERSION}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${NGDBC_URL:-}" ]]; then
+            echo "NGDBC_URL=${NGDBC_URL}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${MYSQL_CONNECTOR_VERSION:-}" ]]; then
+            echo "MYSQL_CONNECTOR_VERSION=${MYSQL_CONNECTOR_VERSION}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${MYSQL_CONNECTOR_URL:-}" ]]; then
+            echo "MYSQL_CONNECTOR_URL=${MYSQL_CONNECTOR_URL}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${ORACLE_JDBC_VERSION:-}" ]]; then
+            echo "ORACLE_JDBC_VERSION=${ORACLE_JDBC_VERSION}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${ORACLE_JDBC_URL:-}" ]]; then
+            echo "ORACLE_JDBC_URL=${ORACLE_JDBC_URL}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${SQLSERVER_JDBC_VERSION:-}" ]]; then
+            echo "SQLSERVER_JDBC_VERSION=${SQLSERVER_JDBC_VERSION}" >> "${GITHUB_ENV}"
+          fi
+          if [[ -n "${SQLSERVER_JDBC_URL:-}" ]]; then
+            echo "SQLSERVER_JDBC_URL=${SQLSERVER_JDBC_URL}" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Download build artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "${BUILD_DIR}/downloads" "${BUILD_DIR}/dist" "${BUILD_DIR}/target"
+
+          if [[ -n "${SEATUNNEL_PACKAGE_URL:-}" ]]; then
+            curl -fL -o "${BUILD_DIR}/downloads/seatunnel.tar.gz" "${SEATUNNEL_PACKAGE_URL}"
+            tar -xzf "${BUILD_DIR}/downloads/seatunnel.tar.gz" -C "${BUILD_DIR}/dist"
+          fi
+
+          if [[ -n "${SEATUNNEL_WEB_PACKAGE_URL:-}" ]]; then
+            curl -fL -o "${BUILD_DIR}/downloads/seatunnel-web.tar.gz" "${SEATUNNEL_WEB_PACKAGE_URL}"
+            tar -xzf "${BUILD_DIR}/downloads/seatunnel-web.tar.gz" -C "${BUILD_DIR}/dist"
+          fi
+
+          if [[ "${WEB_SOURCE_MODE:-}" == "patched_source" || "${WEB_SOURCE_MODE:-}" == "hybrid_patch" || "${WEB_SOURCE_MODE:-}" == "hybrid_patch_jdbcplus" || "${WEB_SOURCE_MODE:-}" == "hybrid_patch_jdbcplus_hana" ]]; then
+            work_src="${RUNNER_TEMP}/seatunnel-web-src-${{ matrix.id }}"
+            git clone --branch "${WEB_SOURCE_TAG}" --depth 1 "${WEB_SOURCE_REPO}" "${work_src}"
+            if [[ -n "${WEB_SOURCE_PATCH:-}" ]]; then
+              git -C "${work_src}" apply "${GITHUB_WORKSPACE}/${BUILD_DIR}/${WEB_SOURCE_PATCH}"
+            fi
+            pushd "${work_src}" >/dev/null
+            chmod +x ./mvnw
+            if [[ "${WEB_SOURCE_MODE:-}" == "patched_source" ]]; then
+              ./mvnw -pl seatunnel-web-dist -am -Pci -DskipUT=true -Dmaven.test.skip=true -Dskip.spotless=true package
+            elif [[ "${WEB_SOURCE_MODE:-}" == "hybrid_patch_jdbcplus_hana" ]]; then
+              ./mvnw -pl seatunnel-server/seatunnel-app,seatunnel-datasource/seatunnel-datasource-plugins/datasource-starrocks,seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-starrocks,seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana,seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-mysql,seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-oracle,seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-sqlserver -am -Pci -DskipUT=true -Dmaven.test.skip=true -Dskip.spotless=true package
+            elif [[ "${WEB_SOURCE_MODE:-}" == "hybrid_patch_jdbcplus" ]]; then
+              ./mvnw -pl seatunnel-server/seatunnel-app,seatunnel-datasource/seatunnel-datasource-plugins/datasource-starrocks,seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-starrocks,seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-mysql,seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-oracle,seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-sqlserver -am -Pci -DskipUT=true -Dmaven.test.skip=true -Dskip.spotless=true package
+            else
+              ./mvnw -pl seatunnel-server/seatunnel-app,seatunnel-datasource/seatunnel-datasource-plugins/datasource-starrocks,seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-starrocks -am -Pci -DskipUT=true -Dmaven.test.skip=true -Dskip.spotless=true package
+            fi
+            popd >/dev/null
+
+            if [[ "${WEB_SOURCE_MODE:-}" == "patched_source" ]]; then
+              rm -rf "${BUILD_DIR}/dist/${SEATUNNEL_WEB_DIR}"
+              tar -xzf "${work_src}/seatunnel-web-dist/target/apache-seatunnel-web-${WEB_SOURCE_TAG}.tar.gz" -C "${BUILD_DIR}/dist"
+            else
+              target_dir="${BUILD_DIR}/dist/${SEATUNNEL_WEB_DIR}"
+              if [[ ! -d "${target_dir}" ]]; then
+                echo "Expected extracted web package at ${target_dir}, but it was not found."
+                exit 1
+              fi
+
+              mkdir -p "${target_dir}/datasource"
+              cp "${work_src}/seatunnel-server/seatunnel-app/target/seatunnel-app-${WEB_SOURCE_TAG}.jar" \
+                "${target_dir}/libs/seatunnel-app-${WEB_SOURCE_TAG}.jar"
+              cp "${work_src}/seatunnel-datasource/seatunnel-datasource-plugins/datasource-starrocks/target/datasource-starrocks-${WEB_SOURCE_TAG}.jar" \
+                "${target_dir}/datasource/"
+              cp "${work_src}/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-starrocks/target/datasource-jdbc-starrocks-${WEB_SOURCE_TAG}.jar" \
+                "${target_dir}/datasource/"
+
+              if [[ -n "${MYSQL_CONNECTOR_URL:-}" ]]; then
+                connector_name="mysql-connector-java-${MYSQL_CONNECTOR_VERSION}.jar"
+                curl -fL -o "${target_dir}/datasource/${connector_name}" "${MYSQL_CONNECTOR_URL}"
+              fi
+
+              if [[ "${WEB_SOURCE_MODE:-}" == "hybrid_patch_jdbcplus" || "${WEB_SOURCE_MODE:-}" == "hybrid_patch_jdbcplus_hana" ]]; then
+                cp "${work_src}/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-mysql/target/datasource-jdbc-mysql-${WEB_SOURCE_TAG}.jar" \
+                  "${target_dir}/datasource/"
+                cp "${work_src}/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-oracle/target/datasource-jdbc-oracle-${WEB_SOURCE_TAG}.jar" \
+                  "${target_dir}/datasource/"
+                cp "${work_src}/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-sqlserver/target/datasource-jdbc-sqlserver-${WEB_SOURCE_TAG}.jar" \
+                  "${target_dir}/datasource/"
+
+                if [[ -n "${ORACLE_JDBC_URL:-}" ]]; then
+                  connector_name="ojdbc8-${ORACLE_JDBC_VERSION}.jar"
+                  curl -fL -o "${target_dir}/datasource/${connector_name}" "${ORACLE_JDBC_URL}"
+                fi
+                if [[ -n "${SQLSERVER_JDBC_URL:-}" ]]; then
+                  connector_name="mssql-jdbc-${SQLSERVER_JDBC_VERSION}.jar"
+                  curl -fL -o "${target_dir}/datasource/${connector_name}" "${SQLSERVER_JDBC_URL}"
+                fi
+
+                if [[ "${WEB_SOURCE_MODE:-}" == "hybrid_patch_jdbcplus_hana" ]]; then
+                  cp "${work_src}/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/target/datasource-jdbc-hana-${WEB_SOURCE_TAG}.jar" \
+                    "${target_dir}/datasource/"
+
+                  if [[ -n "${NGDBC_URL:-}" ]]; then
+                    connector_name="ngdbc-${NGDBC_VERSION}.jar"
+                    curl -fL -o "${target_dir}/datasource/${connector_name}" "${NGDBC_URL}"
+                  fi
+                fi
+              fi
+            fi
+          fi
+
+          if [[ -n "${NGDBC_URL:-}" ]]; then
+            curl -fL -o "${BUILD_DIR}/target/ngdbc.jar" "${NGDBC_URL}"
+          fi
+          if [[ -n "${MYSQL_CONNECTOR_URL:-}" && -n "${MYSQL_CONNECTOR_VERSION:-}" && "${{ matrix.id }}" == "seatunnel_hana_jdbcplus" ]]; then
+            curl -fL -o "${BUILD_DIR}/target/mysql-connector-java-${MYSQL_CONNECTOR_VERSION}.jar" "${MYSQL_CONNECTOR_URL}"
+          fi
+          if [[ -n "${ORACLE_JDBC_URL:-}" && -n "${ORACLE_JDBC_VERSION:-}" && "${{ matrix.id }}" == "seatunnel_hana_jdbcplus" ]]; then
+            curl -fL -o "${BUILD_DIR}/target/ojdbc8-${ORACLE_JDBC_VERSION}.jar" "${ORACLE_JDBC_URL}"
+          fi
+          if [[ -n "${SQLSERVER_JDBC_URL:-}" && -n "${SQLSERVER_JDBC_VERSION:-}" && "${{ matrix.id }}" == "seatunnel_hana_jdbcplus" ]]; then
+            curl -fL -o "${BUILD_DIR}/target/mssql-jdbc-${SQLSERVER_JDBC_VERSION}.jar" "${SQLSERVER_JDBC_URL}"
+          fi
+
+      - name: Set image tags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          image_base="${ALI_REGISTRY}/${ALI_NAMESPACE}/${IMAGE_REPO}"
+          version_tag="${image_base}:${IMAGE_TAG}"
+
+          echo "IMAGE_BASE=${image_base}" >> "${GITHUB_ENV}"
+          echo "VERSION_TAG=${version_tag}" >> "${GITHUB_ENV}"
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            push_latest="${{ github.event.inputs.push_latest }}"
+          else
+            push_latest="false"
+          fi
+
+          echo "PUSH_LATEST=${push_latest}" >> "${GITHUB_ENV}"
+
+          {
+            echo "IMAGE_TAGS<<EOF"
+            echo "${version_tag}"
+            if [[ "${push_latest}" == "true" ]]; then
+              echo "${image_base}:latest"
+            fi
+            echo "EOF"
+          } >> "${GITHUB_ENV}"
+
+      - name: Login to Aliyun Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ALI_REGISTRY }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+          logout: false
+
+      - name: Build and optionally push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.BUILD_DIR }}
+          file: ${{ env.BUILD_DIR }}/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ env.IMAGE_TAGS }}
+          provenance: false
+          build-args: |
+            JAVA_IMAGE=${{ env.JAVA_IMAGE }}
+            SEATUNNEL_DIR=${{ env.SEATUNNEL_DIR }}
+            SEATUNNEL_WEB_DIR=${{ env.SEATUNNEL_WEB_DIR }}
+
+      - name: Publish workflow summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## SeaTunnel Image Build"
+            echo
+            echo "- Target: \`${{ matrix.id }}\`"
+            echo "- Version strategy: \`${VERSION_STRATEGY}\`"
+            echo "- Platforms: \`linux/amd64\`, \`linux/arm64\`"
+            echo "- Image repo: \`${IMAGE_BASE}\`"
+            echo "- Version tag: \`${VERSION_TAG}\`"
+            if [[ -n "${SEATUNNEL_VERSION:-}" ]]; then
+              echo "- SeaTunnel version: \`${SEATUNNEL_VERSION}\`"
+            fi
+            if [[ -n "${SEATUNNEL_WEB_VERSION:-}" ]]; then
+              echo "- SeaTunnel Web version: \`${SEATUNNEL_WEB_VERSION}\`"
+            fi
+            if [[ -n "${NGDBC_VERSION:-}" ]]; then
+              echo "- NGDBC version: \`${NGDBC_VERSION}\`"
+            fi
+            if [[ -n "${MYSQL_CONNECTOR_VERSION:-}" ]]; then
+              echo "- MySQL JDBC version: \`${MYSQL_CONNECTOR_VERSION}\`"
+            fi
+            if [[ -n "${ORACLE_JDBC_VERSION:-}" ]]; then
+              echo "- Oracle JDBC version: \`${ORACLE_JDBC_VERSION}\`"
+            fi
+            if [[ -n "${SQLSERVER_JDBC_VERSION:-}" ]]; then
+              echo "- SQLServer JDBC version: \`${SQLSERVER_JDBC_VERSION}\`"
+            fi
+            if [[ "${PUSH_LATEST}" == "true" ]]; then
+              echo "- Latest tag: \`${IMAGE_BASE}:latest\`"
+            fi
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              echo "- Push mode: skipped on pull request"
+            else
+              echo "- Push mode: enabled"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"

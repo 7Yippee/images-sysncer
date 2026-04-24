@@ -1,0 +1,5 @@
+.DS_Store
+custom-images/**/target/
+custom-images/**/dist/
+custom-images/**/downloads/
+

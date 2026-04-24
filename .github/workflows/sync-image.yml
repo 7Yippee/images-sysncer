@@ -7,14 +7,26 @@ on:
       - main
     paths:
       - image-list.txt
+      - image-alias.txt
       - .github/workflows/sync-image.yml
   pull_request:
     branches:
       - main
     paths:
       - image-list.txt
+      - image-alias.txt
       - .github/workflows/sync-image.yml
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run mode"
+        required: true
+        default: sync_and_alias
+        type: choice
+        options:
+          - sync_and_alias
+          - sync_only
+          - alias_only
 
 permissions:
   contents: read
@@ -26,56 +38,124 @@ concurrency:
 env:
   ALI_REGISTRY: registry.cn-guangzhou.aliyuncs.com
   ALI_NAMESPACE: tools_y
+  ALI_ALIAS_NAMESPACE: tools_y
   MAX_PARALLEL: "4"
   RETRY_TIMES: "3"
   IMAGE_LIST_FILE: image-list.txt
+  ALIAS_LIST_FILE: image-alias.txt
 
 jobs:
   validate:
-    name: Validate image list
+    name: Validate image files
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate image-list.txt
+      - name: Validate image-list.txt and image-alias.txt
         shell: bash
         run: |
           set -euo pipefail
+
+          trim() {
+            local value="$1"
+            value="${value#"${value%%[![:space:]]*}"}"
+            value="${value%"${value##*[![:space:]]}"}"
+            printf '%s\n' "$value"
+          }
+
+          validate_ref() {
+            local kind="$1"
+            local line_no="$2"
+            local ref="$3"
+            local has_error=0
+
+            if [[ -z "$ref" ]]; then
+              echo "${kind} line ${line_no}: empty value"
+              return 1
+            fi
+
+            if [[ "$ref" =~ [[:space:]] ]]; then
+              echo "${kind} line ${line_no}: contains spaces -> $ref"
+              has_error=1
+            fi
+
+            if [[ "$ref" =~ [A-Z] ]]; then
+              echo "${kind} line ${line_no}: contains uppercase characters -> $ref"
+              has_error=1
+            fi
+
+            return "$has_error"
+          }
+
+          invalid=0
 
           if [[ ! -f "${IMAGE_LIST_FILE}" ]]; then
             echo "Missing ${IMAGE_LIST_FILE}"
             exit 1
           fi
 
-          invalid=0
           line_no=0
-
           while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
             line_no=$((line_no + 1))
-            line="${raw_line#"${raw_line%%[![:space:]]*}"}"
-            line="${line%"${line##*[![:space:]]}"}"
-
+            line="$(trim "$raw_line")"
             [[ -z "$line" || "$line" =~ ^# ]] && continue
 
-            if [[ "$line" =~ [[:space:]] ]]; then
-              echo "Line ${line_no}: image reference contains spaces -> $line"
-              invalid=1
-              continue
-            fi
-
-            if [[ "$line" =~ [A-Z] ]]; then
-              echo "Line ${line_no}: image reference contains uppercase characters -> $line"
+            if ! validate_ref "image-list" "$line_no" "$line"; then
               invalid=1
             fi
           done < "${IMAGE_LIST_FILE}"
 
+          if [[ -f "${ALIAS_LIST_FILE}" ]]; then
+            declare -A seen_sources=()
+            declare -A seen_targets=()
+
+            alias_line_no=0
+            while IFS= read -r raw_alias || [[ -n "$raw_alias" ]]; do
+              alias_line_no=$((alias_line_no + 1))
+              line="$(trim "$raw_alias")"
+              [[ -z "$line" || "$line" =~ ^# ]] && continue
+
+              if [[ "$line" != *"=>"* ]]; then
+                echo "alias line ${alias_line_no}: missing '=>' separator -> $line"
+                invalid=1
+                continue
+              fi
+
+              source_part="$(trim "${line%%=>*}")"
+              target_part="$(trim "${line#*=>}")"
+
+              if ! validate_ref "alias source" "$alias_line_no" "$source_part"; then
+                invalid=1
+              fi
+
+              if ! validate_ref "alias target" "$alias_line_no" "$target_part"; then
+                invalid=1
+              fi
+
+              if [[ -n "${seen_sources[$source_part]:-}" ]]; then
+                echo "alias line ${alias_line_no}: duplicate source -> $source_part"
+                invalid=1
+              fi
+
+              if [[ -n "${seen_targets[$target_part]:-}" ]]; then
+                echo "alias line ${alias_line_no}: duplicate target -> $target_part"
+                invalid=1
+              fi
+
+              seen_sources["$source_part"]=1
+              seen_targets["$target_part"]=1
+            done < "${ALIAS_LIST_FILE}"
+          else
+            echo "${ALIAS_LIST_FILE} not found, alias publish will be skipped"
+          fi
+
           if [[ "$invalid" -ne 0 ]]; then
-            echo "image-list.txt validation failed"
+            echo "Validation failed"
             exit 1
           fi
 
-          echo "image-list.txt validation passed"
+          echo "Validation passed"
 
   sync:
     name: Sync images
@@ -106,30 +186,56 @@ jobs:
         shell: bash
         env:
           DEST_CREDS: ${{ secrets.DOCKER_USERNAME }}:${{ secrets.DOCKER_PASSWORD }}
+          DISPATCH_MODE: ${{ github.event.inputs.mode }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: |
           set -Eeuo pipefail
 
           mkdir -p logs
-          : > logs/success.log
-          : > logs/failed.log
-          : > logs/skipped.log
-          mkdir -p logs/parts
+          : > logs/sync-success.log
+          : > logs/sync-failed.log
+          : > logs/sync-skipped.log
+          : > logs/alias-success.log
+          : > logs/alias-failed.log
+          : > logs/alias-skipped.log
+
+          trim() {
+            local value="$1"
+            value="${value#"${value%%[![:space:]]*}"}"
+            value="${value%"${value##*[![:space:]]}"}"
+            printf '%s\n' "$value"
+          }
 
           normalize_source_image() {
             local image="$1"
-            local ref
+            local image_without_suffix
+            local first_part
 
             if [[ "$image" == *"@sha256:"* ]]; then
-              ref="${image%@sha256:*}"
-            else
-              [[ "${image##*/}" != *":"* ]] && image="${image}:latest"
-              ref="${image%:*}"
+              image_without_suffix="${image%@sha256:*}"
+              first_part="${image_without_suffix%%/*}"
+
+              if [[ "$image_without_suffix" != *"/"* ]]; then
+                echo "docker.io/library/${image}"
+              elif [[ "$first_part" == *"."* || "$first_part" == *":"* || "$first_part" == "localhost" ]]; then
+                echo "$image"
+              else
+                echo "docker.io/${image}"
+              fi
+
+              return 0
             fi
 
-            local first="${ref%%/*}"
-            if [[ "$ref" != *"/"* ]]; then
+            if [[ "$image" != *":"* || "${image##*/}" != *":"* ]]; then
+              image="${image}:latest"
+            fi
+
+            image_without_suffix="${image%:*}"
+            first_part="${image_without_suffix%%/*}"
+
+            if [[ "$image_without_suffix" != *"/"* ]]; then
               echo "docker.io/library/${image}"
-            elif [[ "$first" == *"."* || "$first" == *":"* || "$first" == "localhost" ]]; then
+            elif [[ "$first_part" == *"."* || "$first_part" == *":"* || "$first_part" == "localhost" ]]; then
               echo "$image"
             else
               echo "docker.io/${image}"
@@ -137,9 +243,12 @@ jobs:
           }
 
           flatten_image_name() {
-            local normalized="$1"
+            local image="$1"
+            local normalized
             local name_part
             local suffix
+
+            normalized="$(normalize_source_image "$image")"
 
             if [[ "$normalized" == *"@sha256:"* ]]; then
               name_part="${normalized%@sha256:*}"
@@ -149,16 +258,16 @@ jobs:
               suffix=":${normalized##*:}"
             fi
 
-            name_part="$(echo "$name_part" | tr '/' '_' | tr ':' '_')"
+            name_part="$(echo "$name_part" | tr '/:' '__' | tr '.' '-')"
             echo "${name_part}${suffix}"
           }
 
-          target_exists() {
-            local target_image="$1"
-            skopeo inspect --creds "${DEST_CREDS}" "docker://${target_image}" >/dev/null 2>&1
+          image_exists() {
+            local image="$1"
+            skopeo inspect --creds "${DEST_CREDS}" "docker://${image}" >/dev/null 2>&1
           }
 
-          copy_with_retry() {
+          copy_external_with_retry() {
             local source_image="$1"
             local target_image="$2"
             local attempt=1
@@ -169,68 +278,198 @@ jobs:
                 return 0
               fi
               attempt=$((attempt + 1))
-              sleep $((attempt * 3))
+              sleep 3
             done
 
             return 1
           }
 
-          process_one_image() {
+          copy_internal_with_retry() {
+            local source_image="$1"
+            local target_image="$2"
+            local attempt=1
+
+            while (( attempt <= RETRY_TIMES )); do
+              echo "Attempt ${attempt}/${RETRY_TIMES}: ${source_image} -> ${target_image}"
+              if skopeo copy --all --src-creds "${DEST_CREDS}" --dest-creds "${DEST_CREDS}" "docker://${source_image}" "docker://${target_image}"; then
+                return 0
+              fi
+              attempt=$((attempt + 1))
+              sleep 3
+            done
+
+            return 1
+          }
+
+          get_run_mode() {
+            if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && -n "${DISPATCH_MODE:-}" ]]; then
+              echo "${DISPATCH_MODE}"
+            else
+              echo "sync_and_alias"
+            fi
+          }
+
+          get_alias_target_image() {
+            local alias_ref="$1"
+            local first_part
+
+            if [[ "$alias_ref" == */* ]]; then
+              first_part="${alias_ref%%/*}"
+              if [[ "$first_part" == *"."* || "$first_part" == *":"* || "$first_part" == "localhost" ]]; then
+                echo "$alias_ref"
+                return 0
+              fi
+            fi
+
+            echo "${ALI_REGISTRY}/${ALI_ALIAS_NAMESPACE}/${alias_ref}"
+          }
+
+          process_one_sync_image() {
             local original_image="$1"
             local source_image
             local flat_name
             local target_image
 
             source_image="$(normalize_source_image "$original_image")"
-            flat_name="$(flatten_image_name "$source_image")"
+            flat_name="$(flatten_image_name "$original_image")"
             target_image="${ALI_REGISTRY}/${ALI_NAMESPACE}/${flat_name}"
 
-            echo "Processing: ${source_image} -> ${target_image}"
+            echo "Processing sync: ${source_image} -> ${target_image}"
 
-            if target_exists "${target_image}"; then
-              echo "[SKIPPED] ${source_image} -> ${target_image}" >> "logs/parts/skipped_${BASHPID}.log"
-              echo "⏭️  Target already exists: ${target_image}"
+            if image_exists "${target_image}"; then
+              echo "[SKIPPED] ${source_image} -> ${target_image}" >> logs/sync-skipped.log
+              echo "Target already exists: ${target_image}"
               return 0
             fi
 
-            if copy_with_retry "${source_image}" "${target_image}"; then
-              echo "[SUCCESS] ${source_image} -> ${target_image}" >> "logs/parts/success_${BASHPID}.log"
-              echo "✅ Sync success: ${source_image}"
+            if copy_external_with_retry "${source_image}" "${target_image}"; then
+              echo "[SUCCESS] ${source_image} -> ${target_image}" >> logs/sync-success.log
+              echo "Sync success: ${source_image}"
             else
-              echo "[FAILED] ${source_image} -> ${target_image}" >> "logs/parts/failed_${BASHPID}.log"
-              echo "❌ Sync failed: ${source_image}"
+              echo "[FAILED] ${source_image} -> ${target_image}" >> logs/sync-failed.log
+              echo "Sync failed: ${source_image}"
               return 1
             fi
           }
 
-          export -f normalize_source_image flatten_image_name target_exists copy_with_retry process_one_image
-          export ALI_REGISTRY ALI_NAMESPACE DEST_CREDS RETRY_TIMES
+          process_alias_line() {
+            local raw_line="$1"
+            local source_ref
+            local alias_ref
+            local sync_flat_name
+            local sync_target_image
+            local alias_target_image
 
-          grep -v '^\s*#' "${IMAGE_LIST_FILE}" | grep -v '^\s*$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | \
-            xargs -P "${MAX_PARALLEL}" -I{} bash -c 'process_one_image "$@"' _ {} || true
+            source_ref="$(trim "${raw_line%%=>*}")"
+            alias_ref="$(trim "${raw_line#*=>}")"
+            sync_flat_name="$(flatten_image_name "$source_ref")"
+            sync_target_image="${ALI_REGISTRY}/${ALI_NAMESPACE}/${sync_flat_name}"
+            alias_target_image="$(get_alias_target_image "$alias_ref")"
 
-          # Merge per-process logs
-          cat logs/parts/success_*.log >> logs/success.log 2>/dev/null || true
-          cat logs/parts/failed_*.log >> logs/failed.log 2>/dev/null || true
-          cat logs/parts/skipped_*.log >> logs/skipped.log 2>/dev/null || true
+            echo "Processing alias: ${sync_target_image} -> ${alias_target_image}"
+
+            if ! image_exists "${sync_target_image}"; then
+              echo "[FAILED] ${sync_target_image} -> ${alias_target_image} (source missing)" >> logs/alias-failed.log
+              echo "Alias source image missing: ${sync_target_image}"
+              return 1
+            fi
+
+            if image_exists "${alias_target_image}"; then
+              echo "[SKIPPED] ${sync_target_image} -> ${alias_target_image}" >> logs/alias-skipped.log
+              echo "Alias target already exists: ${alias_target_image}"
+              return 0
+            fi
+
+            if copy_internal_with_retry "${sync_target_image}" "${alias_target_image}"; then
+              echo "[SUCCESS] ${sync_target_image} -> ${alias_target_image}" >> logs/alias-success.log
+              echo "Alias publish success: ${alias_target_image}"
+            else
+              echo "[FAILED] ${sync_target_image} -> ${alias_target_image}" >> logs/alias-failed.log
+              echo "Alias publish failed: ${alias_target_image}"
+              return 1
+            fi
+          }
+
+          export -f trim normalize_source_image flatten_image_name image_exists
+          export -f copy_external_with_retry copy_internal_with_retry
+          export -f get_alias_target_image process_one_sync_image process_alias_line
+          export ALI_REGISTRY ALI_NAMESPACE ALI_ALIAS_NAMESPACE DEST_CREDS RETRY_TIMES
+
+          run_mode="$(get_run_mode)"
+          echo "Run mode: ${run_mode}"
+
+          sync_wait_failed=0
+          alias_wait_failed=0
+
+          if [[ "${run_mode}" != "alias_only" ]]; then
+            pids=()
+
+            while IFS= read -r image || [[ -n "$image" ]]; do
+              image="$(trim "$image")"
+              [[ -z "$image" || "$image" =~ ^# ]] && continue
+
+              while (( $(jobs -r | wc -l) >= MAX_PARALLEL )); do
+                sleep 1
+              done
+
+              process_one_sync_image "$image" &
+              pids+=("$!")
+            done < "${IMAGE_LIST_FILE}"
+
+            for pid in "${pids[@]}"; do
+              if ! wait "$pid"; then
+                sync_wait_failed=1
+              fi
+            done
+          else
+            echo "Skip sync phase in alias_only mode"
+          fi
+
+          if [[ "${run_mode}" != "sync_only" ]]; then
+            if [[ -f "${ALIAS_LIST_FILE}" ]]; then
+              while IFS= read -r alias_line || [[ -n "$alias_line" ]]; do
+                alias_line="$(trim "$alias_line")"
+                [[ -z "$alias_line" || "$alias_line" =~ ^# ]] && continue
+
+                if ! process_alias_line "$alias_line"; then
+                  alias_wait_failed=1
+                fi
+              done < "${ALIAS_LIST_FILE}"
+            else
+              echo "${ALIAS_LIST_FILE} not found, skip alias publish"
+            fi
+          else
+            echo "Skip alias phase in sync_only mode"
+          fi
 
           {
             echo "## Sync Summary"
             echo ""
-            echo "- Success: $(wc -l < logs/success.log)"
-            echo "- Skipped: $(wc -l < logs/skipped.log)"
-            echo "- Failed: $(wc -l < logs/failed.log)"
+            echo "- Run mode: ${run_mode}"
+            echo "- Sync success: $(wc -l < logs/sync-success.log || echo 0)"
+            echo "- Sync skipped: $(wc -l < logs/sync-skipped.log || echo 0)"
+            echo "- Sync failed: $(wc -l < logs/sync-failed.log || echo 0)"
+            echo "- Alias success: $(wc -l < logs/alias-success.log || echo 0)"
+            echo "- Alias skipped: $(wc -l < logs/alias-skipped.log || echo 0)"
+            echo "- Alias failed: $(wc -l < logs/alias-failed.log || echo 0)"
             echo ""
 
-            if [[ -s logs/failed.log ]]; then
-              echo "### Failed"
+            if [[ -s logs/sync-failed.log ]]; then
+              echo "### Sync Failed"
               echo '```text'
-              cat logs/failed.log
+              cat logs/sync-failed.log
+              echo '```'
+            fi
+
+            if [[ -s logs/alias-failed.log ]]; then
+              echo "### Alias Failed"
+              echo '```text'
+              cat logs/alias-failed.log
               echo '```'
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
-          if [[ -s logs/failed.log ]]; then
+          if [[ -s logs/sync-failed.log || "$sync_wait_failed" -ne 0 || -s logs/alias-failed.log || "$alias_wait_failed" -ne 0 ]]; then
             exit 1
           fi
 

@@ -1,0 +1,611 @@
+diff --git a/seatunnel-datasource/seatunnel-datasource-client/src/main/java/org/apache/seatunnel/datasource/classloader/DatasourceLoadConfig.java b/seatunnel-datasource/seatunnel-datasource-client/src/main/java/org/apache/seatunnel/datasource/classloader/DatasourceLoadConfig.java
+index af8399e9..5eaaa70b 100644
+--- a/seatunnel-datasource/seatunnel-datasource-client/src/main/java/org/apache/seatunnel/datasource/classloader/DatasourceLoadConfig.java
++++ b/seatunnel-datasource/seatunnel-datasource-client/src/main/java/org/apache/seatunnel/datasource/classloader/DatasourceLoadConfig.java
+@@ -56,6 +56,9 @@ public class DatasourceLoadConfig {
+         classLoaderFactoryName.put(
+                 "JDBC-CLICKHOUSE",
+                 "org.apache.seatunnel.datasource.plugin.clickhouse.jdbc.ClickhouseJdbcDataSourceFactory");
++        classLoaderFactoryName.put(
++                "JDBC-HANA",
++                "org.apache.seatunnel.datasource.plugin.hana.jdbc.HanaJdbcDataSourceFactory");
+         classLoaderFactoryName.put(
+                 "HIVE", "org.apache.seatunnel.datasource.plugin.hive.HiveDataSourceFactory");
+         classLoaderFactoryName.put(
+@@ -109,6 +112,7 @@ public class DatasourceLoadConfig {
+ 
+         classLoaderJarName.put("JDBC-ORACLE", "datasource-jdbc-oracle-");
+         classLoaderJarName.put("JDBC-CLICKHOUSE", "datasource-jdbc-clickhouse-");
++        classLoaderJarName.put("JDBC-HANA", "datasource-jdbc-hana-");
+         classLoaderJarName.put("JDBC-POSTGRES", "datasource-jdbc-postgresql-");
+         classLoaderJarName.put("JDBC-TIDB", "datasource-jdbc-tidb-");
+         classLoaderJarName.put("JDBC-REDSHIFT", "datasource-jdbc-redshift-");
+@@ -137,6 +141,7 @@ public class DatasourceLoadConfig {
+                     "JDBC-Mysql",
+                     "ElasticSearch",
+                     "JDBC-ClickHouse",
++                    "JDBC-Hana",
+                     "Hive",
+                     "JDBC-Oracle",
+                     "JDBC-Postgres",
+diff --git a/seatunnel-datasource/seatunnel-datasource-plugins/datasource-all/pom.xml b/seatunnel-datasource/seatunnel-datasource-plugins/datasource-all/pom.xml
+index 27036377..7e2ec400 100644
+--- a/seatunnel-datasource/seatunnel-datasource-plugins/datasource-all/pom.xml
++++ b/seatunnel-datasource/seatunnel-datasource-plugins/datasource-all/pom.xml
+@@ -29,6 +29,11 @@
+             <artifactId>datasource-jdbc-clickhouse</artifactId>
+             <version>${project.version}</version>
+         </dependency>
++        <dependency>
++            <groupId>org.apache.seatunnel</groupId>
++            <artifactId>datasource-jdbc-hana</artifactId>
++            <version>${project.version}</version>
++        </dependency>
+         <dependency>
+             <groupId>org.apache.seatunnel</groupId>
+             <artifactId>datasource-jdbc-hive</artifactId>
+diff --git a/seatunnel-datasource/seatunnel-datasource-plugins/pom.xml b/seatunnel-datasource/seatunnel-datasource-plugins/pom.xml
+index 7e1283da..722cfff6 100644
+--- a/seatunnel-datasource/seatunnel-datasource-plugins/pom.xml
++++ b/seatunnel-datasource/seatunnel-datasource-plugins/pom.xml
+@@ -33,6 +33,7 @@
+         <module>datasource-hive</module>
+         <module>datasource-starrocks</module>
+         <module>datasource-jdbc-clickhouse</module>
++        <module>datasource-jdbc-hana</module>
+         <module>datasource-jdbc-mysql</module>
+         <module>datasource-jdbc-oracle</module>
+         <module>datasource-jdbc-postgresql</module>
+diff --git a/seatunnel-server/seatunnel-app/src/main/resources/connector-datasource-mapper.yaml b/seatunnel-server/seatunnel-app/src/main/resources/connector-datasource-mapper.yaml
+index 392bb2bf..af862335 100644
+--- a/seatunnel-server/seatunnel-app/src/main/resources/connector-datasource-mapper.yaml
++++ b/seatunnel-server/seatunnel-app/src/main/resources/connector-datasource-mapper.yaml
+@@ -19,6 +19,7 @@ connector-datasource-mapper:
+   connectorDatasourceMappers:
+     Jdbc:
+       dataSources:
++        - JDBC-Hana
+         - JDBC-Mysql
+         - JDBC-Postgres
+         - JDBC-TiDB
+@@ -73,6 +74,11 @@ connector-datasource-mapper:
+         - Hive
+ 
+   sourceDatasourceFeatures:
++    JDBC-Hana:
++      businessMode:
++        - DATA_INTEGRATION
++      sceneMode:
++        - SINGLE_TABLE
+     JDBC-Mysql:
+       businessMode:
+         - DATA_INTEGRATION
+@@ -269,4 +275,4 @@ connector-datasource-mapper:
+       businessMode:
+         - DATA_INTEGRATION
+       sceneMode:
+-        - SINGLE_TABLE
+\ No newline at end of file
++        - SINGLE_TABLE
+diff --git a/seatunnel-server/seatunnel-app/src/main/java/org/apache/seatunnel/app/thirdparty/datasource/impl/HanaDataSourceConfigSwitcher.java b/seatunnel-server/seatunnel-app/src/main/java/org/apache/seatunnel/app/thirdparty/datasource/impl/HanaDataSourceConfigSwitcher.java
+new file mode 100644
+index 00000000..00ee0026
+--- /dev/null
++++ b/seatunnel-server/seatunnel-app/src/main/java/org/apache/seatunnel/app/thirdparty/datasource/impl/HanaDataSourceConfigSwitcher.java
+@@ -0,0 +1,36 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *    http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.seatunnel.app.thirdparty.datasource.impl;
++
++import org.apache.seatunnel.app.thirdparty.datasource.DataSourceConfigSwitcher;
++
++import com.google.auto.service.AutoService;
++
++@AutoService(DataSourceConfigSwitcher.class)
++public class HanaDataSourceConfigSwitcher extends BaseJdbcDataSourceConfigSwitcher {
++
++    @Override
++    protected String quoteIdentifier(String identifier) {
++        return "\"" + identifier + "\"";
++    }
++
++    @Override
++    public String getDataSourceName() {
++        return "JDBC-HANA";
++    }
++}
+diff --git a/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/pom.xml b/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/pom.xml
+new file mode 100644
+index 00000000..519e225d
+--- /dev/null
++++ b/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/pom.xml
+@@ -0,0 +1,70 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!--
++    Licensed to the Apache Software Foundation (ASF) under one or more
++    contributor license agreements.  See the NOTICE file distributed with
++    this work for additional information regarding copyright ownership.
++    The ASF licenses this file to You under the Apache License, Version 2.0
++    (the "License"); you may not use this file except in compliance with
++    the License.  You may obtain a copy of the License at
++       http://www.apache.org/licenses/LICENSE-2.0
++    Unless required by applicable law or agreed to in writing, software
++    distributed under the License is distributed on an "AS IS" BASIS,
++    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++    See the License for the specific language governing permissions and
++    limitations under the License.
++-->
++<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
++    <modelVersion>4.0.0</modelVersion>
++    <parent>
++        <groupId>org.apache.seatunnel</groupId>
++        <artifactId>seatunnel-datasource-plugins</artifactId>
++        <version>1.0.2</version>
++    </parent>
++
++    <artifactId>datasource-jdbc-hana</artifactId>
++
++    <dependencies>
++        <dependency>
++            <groupId>org.apache.seatunnel</groupId>
++            <artifactId>datasource-plugins-api</artifactId>
++            <version>${project.version}</version>
++            <scope>provided</scope>
++        </dependency>
++        <dependency>
++            <groupId>org.apache.commons</groupId>
++            <artifactId>commons-lang3</artifactId>
++        </dependency>
++        <dependency>
++            <groupId>com.google.auto.service</groupId>
++            <artifactId>auto-service</artifactId>
++        </dependency>
++        <dependency>
++            <groupId>org.apache.seatunnel</groupId>
++            <artifactId>seatunnel-api</artifactId>
++            <scope>provided</scope>
++        </dependency>
++    </dependencies>
++
++    <build>
++        <plugins>
++            <plugin>
++                <groupId>org.apache.maven.plugins</groupId>
++                <artifactId>maven-dependency-plugin</artifactId>
++                <configuration>
++                    <skip>${e2e.dependency.skip}</skip>
++                    <appendOutput>true</appendOutput>
++                </configuration>
++            </plugin>
++
++            <plugin>
++                <groupId>org.apache.maven.plugins</groupId>
++                <artifactId>maven-shade-plugin</artifactId>
++            </plugin>
++        </plugins>
++    </build>
++
++
++  <scm>
++    <tag>1.0.2</tag>
++  </scm>
++</project>
+diff --git a/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/src/main/java/org/apache/seatunnel/datasource/plugin/hana/jdbc/HanaOptionRule.java b/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/src/main/java/org/apache/seatunnel/datasource/plugin/hana/jdbc/HanaOptionRule.java
+new file mode 100644
+index 00000000..8fdf4921
+--- /dev/null
++++ b/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/src/main/java/org/apache/seatunnel/datasource/plugin/hana/jdbc/HanaOptionRule.java
+@@ -0,0 +1,72 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *    http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.seatunnel.datasource.plugin.hana.jdbc;
++
++import org.apache.seatunnel.api.configuration.Option;
++import org.apache.seatunnel.api.configuration.Options;
++
++public class HanaOptionRule {
++
++    public static final Option<String> URL =
++            Options.key("url")
++                    .stringType()
++                    .noDefaultValue()
++                    .withDescription(
++                            "jdbc url, eg:"
++                                    + " jdbc:sap://localhost:30015/HXP?communicationTimeout=30000");
++
++    public static final Option<String> USER =
++            Options.key("user").stringType().noDefaultValue().withDescription("jdbc user");
++
++    public static final Option<String> PASSWORD =
++            Options.key("password").stringType().noDefaultValue().withDescription("jdbc password");
++
++    public static final Option<String> DATABASE =
++            Options.key("database")
++                    .stringType()
++                    .noDefaultValue()
++                    .withDescription("HANA schema");
++
++    public static final Option<String> TABLE =
++            Options.key("table").stringType().noDefaultValue().withDescription("HANA table");
++
++    public static final Option<DriverType> DRIVER =
++            Options.key("driver")
++                    .enumType(DriverType.class)
++                    .defaultValue(DriverType.HANA)
++                    .withDescription("driver");
++
++    public enum DriverType {
++        HANA("com.sap.db.jdbc.Driver"),
++        ;
++        private final String driverClassName;
++
++        DriverType(String driverClassName) {
++            this.driverClassName = driverClassName;
++        }
++
++        public String getDriverClassName() {
++            return driverClassName;
++        }
++
++        @Override
++        public String toString() {
++            return driverClassName;
++        }
++    }
++}
+diff --git a/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/src/main/java/org/apache/seatunnel/datasource/plugin/hana/jdbc/HanaDataSourceConfig.java b/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/src/main/java/org/apache/seatunnel/datasource/plugin/hana/jdbc/HanaDataSourceConfig.java
+new file mode 100644
+index 00000000..c23bd5d0
+--- /dev/null
++++ b/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/src/main/java/org/apache/seatunnel/datasource/plugin/hana/jdbc/HanaDataSourceConfig.java
+@@ -0,0 +1,65 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *    http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.seatunnel.datasource.plugin.hana.jdbc;
++
++import org.apache.seatunnel.api.configuration.util.OptionRule;
++import org.apache.seatunnel.datasource.plugin.api.DataSourcePluginInfo;
++import org.apache.seatunnel.datasource.plugin.api.DatasourcePluginTypeEnum;
++
++import com.google.common.collect.Sets;
++
++import java.util.Set;
++
++public class HanaDataSourceConfig {
++
++    public static final String PLUGIN_NAME = "JDBC-Hana";
++
++    public static final DataSourcePluginInfo HANA_DATASOURCE_PLUGIN_INFO =
++            DataSourcePluginInfo.builder()
++                    .name(PLUGIN_NAME)
++                    .icon(PLUGIN_NAME)
++                    .version("1.0.0")
++                    .type(DatasourcePluginTypeEnum.DATABASE.getCode())
++                    .build();
++
++    public static final Set<String> HANA_SYSTEM_SCHEMAS =
++            Sets.newHashSet(
++                    "SYS",
++                    "SYSTEM",
++                    "PUBLIC",
++                    "_SYS_AFLLANG",
++                    "_SYS_AFL",
++                    "_SYS_BI",
++                    "_SYS_BIC",
++                    "_SYS_DI",
++                    "_SYS_EPM",
++                    "_SYS_REPO",
++                    "_SYS_RT",
++                    "_SYS_SQL_ANALYZER",
++                    "_SYS_STATISTICS",
++                    "_SYS_TASK");
++
++    public static final OptionRule OPTION_RULE =
++            OptionRule.builder()
++                    .required(HanaOptionRule.URL, HanaOptionRule.DRIVER)
++                    .optional(HanaOptionRule.USER, HanaOptionRule.PASSWORD)
++                    .build();
++
++    public static final OptionRule METADATA_RULE =
++            OptionRule.builder().required(HanaOptionRule.DATABASE, HanaOptionRule.TABLE).build();
++}
+diff --git a/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/src/main/java/org/apache/seatunnel/datasource/plugin/hana/jdbc/HanaJdbcDataSourceFactory.java b/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/src/main/java/org/apache/seatunnel/datasource/plugin/hana/jdbc/HanaJdbcDataSourceFactory.java
+new file mode 100644
+index 00000000..7fa5c6ad
+--- /dev/null
++++ b/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/src/main/java/org/apache/seatunnel/datasource/plugin/hana/jdbc/HanaJdbcDataSourceFactory.java
+@@ -0,0 +1,47 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *    http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.seatunnel.datasource.plugin.hana.jdbc;
++
++import org.apache.seatunnel.datasource.plugin.api.DataSourceChannel;
++import org.apache.seatunnel.datasource.plugin.api.DataSourceFactory;
++import org.apache.seatunnel.datasource.plugin.api.DataSourcePluginInfo;
++
++import com.google.auto.service.AutoService;
++import com.google.common.collect.Sets;
++import lombok.extern.slf4j.Slf4j;
++
++import java.util.Set;
++
++@Slf4j
++@AutoService(DataSourceFactory.class)
++public class HanaJdbcDataSourceFactory implements DataSourceFactory {
++    @Override
++    public String factoryIdentifier() {
++        return HanaDataSourceConfig.PLUGIN_NAME;
++    }
++
++    @Override
++    public Set<DataSourcePluginInfo> supportedDataSources() {
++        return Sets.newHashSet(HanaDataSourceConfig.HANA_DATASOURCE_PLUGIN_INFO);
++    }
++
++    @Override
++    public DataSourceChannel createChannel() {
++        return new HanaJdbcDataSourceChannel();
++    }
++}
+diff --git a/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/src/main/java/org/apache/seatunnel/datasource/plugin/hana/jdbc/HanaJdbcDataSourceChannel.java b/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/src/main/java/org/apache/seatunnel/datasource/plugin/hana/jdbc/HanaJdbcDataSourceChannel.java
+new file mode 100644
+index 00000000..687eadff
+--- /dev/null
++++ b/seatunnel-datasource/seatunnel-datasource-plugins/datasource-jdbc-hana/src/main/java/org/apache/seatunnel/datasource/plugin/hana/jdbc/HanaJdbcDataSourceChannel.java
+@@ -0,0 +1,196 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *    http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.seatunnel.datasource.plugin.hana.jdbc;
++
++import org.apache.seatunnel.api.configuration.util.OptionRule;
++import org.apache.seatunnel.datasource.plugin.api.DataSourceChannel;
++import org.apache.seatunnel.datasource.plugin.api.DataSourcePluginException;
++import org.apache.seatunnel.datasource.plugin.api.model.TableField;
++
++import org.apache.commons.lang3.StringUtils;
++
++import lombok.NonNull;
++
++import java.sql.Connection;
++import java.sql.DatabaseMetaData;
++import java.sql.DriverManager;
++import java.sql.PreparedStatement;
++import java.sql.ResultSet;
++import java.sql.SQLException;
++import java.util.ArrayList;
++import java.util.Comparator;
++import java.util.List;
++import java.util.Map;
++import java.util.Properties;
++import java.util.function.Function;
++import java.util.stream.Collectors;
++
++import static com.google.common.base.Preconditions.checkNotNull;
++
++public class HanaJdbcDataSourceChannel implements DataSourceChannel {
++
++    @Override
++    public OptionRule getDataSourceOptions(@NonNull String pluginName) {
++        return HanaDataSourceConfig.OPTION_RULE;
++    }
++
++    @Override
++    public OptionRule getDatasourceMetadataFieldsByDataSourceName(@NonNull String pluginName) {
++        return HanaDataSourceConfig.METADATA_RULE;
++    }
++
++    @Override
++    public List<String> getTables(
++            @NonNull String pluginName,
++            Map<String, String> requestParams,
++            String database,
++            Map<String, String> options) {
++        List<String> tableNames = new ArrayList<>();
++        String filterName = options.get("filterName");
++        String size = options.get("size");
++        boolean limitBySize = StringUtils.isNotEmpty(size);
++        if (StringUtils.isNotEmpty(filterName) && !filterName.contains("%")) {
++            filterName = "%" + filterName + "%";
++        } else if (StringUtils.equals(filterName, "")) {
++            filterName = null;
++        }
++        try (Connection connection = getConnection(requestParams);
++                ResultSet resultSet =
++                        connection
++                                .getMetaData()
++                                .getTables(null, database, filterName, new String[] {"TABLE", "VIEW"})) {
++            while (resultSet.next()) {
++                String tableName = resultSet.getString("TABLE_NAME");
++                if (StringUtils.isNotBlank(tableName)) {
++                    tableNames.add(tableName);
++                    if (limitBySize && tableNames.size() >= Integer.parseInt(size)) {
++                        break;
++                    }
++                }
++            }
++            return tableNames;
++        } catch (ClassNotFoundException | SQLException e) {
++            throw new DataSourcePluginException("get hana table names failed", e);
++        }
++    }
++
++    @Override
++    public List<String> getDatabases(
++            @NonNull String pluginName, @NonNull Map<String, String> requestParams) {
++        List<String> schemaNames = new ArrayList<>();
++        try (Connection connection = getConnection(requestParams);
++                PreparedStatement statement =
++                        connection.prepareStatement(
++                                "SELECT SCHEMA_NAME FROM SYS.SCHEMAS ORDER BY SCHEMA_NAME");
++                ResultSet resultSet = statement.executeQuery()) {
++            while (resultSet.next()) {
++                String schemaName = resultSet.getString("SCHEMA_NAME");
++                if (StringUtils.isBlank(schemaName)) {
++                    continue;
++                }
++                if (HanaDataSourceConfig.HANA_SYSTEM_SCHEMAS.contains(schemaName)
++                        || schemaName.startsWith("_SYS_")) {
++                    continue;
++                }
++                schemaNames.add(schemaName);
++            }
++            return schemaNames.stream().sorted(Comparator.naturalOrder()).collect(Collectors.toList());
++        } catch (SQLException | ClassNotFoundException e) {
++            throw new DataSourcePluginException("get hana schemas failed", e);
++        }
++    }
++
++    @Override
++    public boolean checkDataSourceConnectivity(
++            @NonNull String pluginName, @NonNull Map<String, String> requestParams) {
++        try (Connection ignored = getConnection(requestParams)) {
++            return true;
++        } catch (Exception e) {
++            throw new DataSourcePluginException("check hana connectivity failed", e);
++        }
++    }
++
++    @Override
++    public List<TableField> getTableFields(
++            @NonNull String pluginName,
++            @NonNull Map<String, String> requestParams,
++            @NonNull String database,
++            @NonNull String table) {
++        List<TableField> tableFields = new ArrayList<>();
++        try (Connection connection = getConnection(requestParams)) {
++            DatabaseMetaData metaData = connection.getMetaData();
++            String primaryKey = getPrimaryKey(metaData, database, table);
++            try (ResultSet resultSet = metaData.getColumns(null, database, table, null)) {
++                while (resultSet.next()) {
++                    TableField tableField = new TableField();
++                    String columnName = resultSet.getString("COLUMN_NAME");
++                    tableField.setPrimaryKey(false);
++                    if (StringUtils.isNotBlank(primaryKey) && primaryKey.equals(columnName)) {
++                        tableField.setPrimaryKey(true);
++                    }
++                    tableField.setName(columnName);
++                    tableField.setType(resultSet.getString("TYPE_NAME"));
++                    tableField.setComment(resultSet.getString("REMARKS"));
++                    Object nullable = resultSet.getObject("IS_NULLABLE");
++                    tableField.setNullable(Boolean.TRUE.toString().equals(String.valueOf(nullable)));
++                    tableFields.add(tableField);
++                }
++            }
++        } catch (ClassNotFoundException | SQLException e) {
++            throw new DataSourcePluginException("get hana table fields failed", e);
++        }
++        return tableFields;
++    }
++
++    @Override
++    public Map<String, List<TableField>> getTableFields(
++            @NonNull String pluginName,
++            @NonNull Map<String, String> requestParams,
++            @NonNull String database,
++            @NonNull List<String> tables) {
++        return tables.parallelStream()
++                .collect(
++                        Collectors.toMap(
++                                Function.identity(),
++                                table -> getTableFields(pluginName, requestParams, database, table)));
++    }
++
++    private String getPrimaryKey(DatabaseMetaData metaData, String schemaName, String tableName)
++            throws SQLException {
++        try (ResultSet primaryKeysInfo = metaData.getPrimaryKeys(null, schemaName, tableName)) {
++            while (primaryKeysInfo.next()) {
++                return primaryKeysInfo.getString("COLUMN_NAME");
++            }
++        }
++        return null;
++    }
++
++    private Connection getConnection(Map<String, String> requestParams)
++            throws SQLException, ClassNotFoundException {
++        checkNotNull(requestParams.get(HanaOptionRule.DRIVER.key()));
++        checkNotNull(requestParams.get(HanaOptionRule.URL.key()), "Jdbc url cannot be null");
++        Class.forName(requestParams.get(HanaOptionRule.DRIVER.key()));
++
++        Properties info = new Properties();
++        if (requestParams.containsKey(HanaOptionRule.USER.key())) {
++            info.put("user", requestParams.get(HanaOptionRule.USER.key()));
++            info.put("password", requestParams.get(HanaOptionRule.PASSWORD.key()));
++        }
++        return DriverManager.getConnection(requestParams.get(HanaOptionRule.URL.key()), info);
++    }
++}

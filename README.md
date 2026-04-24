@@ -2,24 +2,44 @@
 
 把 `image-list.txt` 里的镜像同步到阿里云容器仓库。
 
-当前仓库已经内置 GitHub Actions 自动流程：
+这版已经升级成两层模式：
 
-- `pull_request`
-  - 只校验 `image-list.txt`
-  - 不真正推送镜像
-- `push main`
-  - 校验通过后自动同步到阿里云仓库
-- `workflow_dispatch`
-  - 手动触发同步
+- 完整名同步层
+  - 保留源 registry 信息，避免撞名
+- 别名发布层
+  - 根据 `image-alias.txt` 再发布一份短名字镜像，适合正式私有仓库使用
 
 ## 目录说明
 
 ```text
 images-sysncer/
 ├── .github/workflows/sync-image.yml
+├── .github/workflows/build-sap-kafka-connect-hana.yml
+├── .github/workflows/build-seatunnel-images.yml
+├── custom-images/
+│   ├── sap-kafka-connect-hana/
+│   └── seatunnel-stack/
+│       ├── apache-seatunnel/
+│       ├── apache-seatunnel-hana/
+│       └── seatunnel-web/
 ├── image-list.txt
+├── image-alias.txt
 └── README.md
 ```
+
+## 当前 workflow 行为
+
+- `pull_request`
+  - 校验 `image-list.txt` 和 `image-alias.txt`
+  - 不真正推送镜像
+- `push main`
+  - 先同步完整名镜像
+  - 如果存在 `image-alias.txt`，继续发布短名字镜像
+- `workflow_dispatch`
+  - 支持手动选择模式
+  - `sync_and_alias`
+  - `sync_only`
+  - `alias_only`
 
 ## image-list.txt 格式
 
@@ -40,6 +60,39 @@ ccr.ccs.tencentyun.com/looloodebug/looloodebug
 busybox:1.36
 ```
 
+## image-alias.txt 格式
+
+一行一个映射：
+
+```text
+docker.io/library/mysql:5.7 => mysql:5.7
+tailscale/tailscale:v1.94.2 => tailscale:v1.94.2
+headscale/headscale:v0.28.0 => headscale:v0.28.0
+```
+
+含义：
+
+- 左边：源镜像
+- 右边：你想发布成的短名字
+
+默认别名会发布到：
+
+```text
+registry.cn-guangzhou.aliyuncs.com/tools_y/<alias_repo:tag>
+```
+
+如果你想换命名空间，可以改 workflow 里的：
+
+```text
+ALI_ALIAS_NAMESPACE
+```
+
+如果你想直接写完整目标地址，也支持：
+
+```text
+docker.io/library/mysql:5.7 => registry.cn-guangzhou.aliyuncs.com/tools_y_private/mysql:5.7
+```
+
 ## 需要配置的 Secrets
 
 在 GitHub 仓库 `Settings > Secrets and variables > Actions` 里至少配置：
@@ -47,29 +100,114 @@ busybox:1.36
 - `DOCKER_USERNAME`
 - `DOCKER_PASSWORD`
 
-它们对应的是你的阿里云镜像仓库账号和密码。
+它们对应阿里云镜像仓库账号和密码。
 
-## 当前 workflow 的改进点
+## 自定义镜像构建
 
-这版 workflow 已经做了这些增强：
+这个仓库现在除了“同步外部镜像”，也支持“构建自定义镜像并推送到阿里云”。
 
-- 修正了 workflow 文件路径触发错误
-- `PR` 只做校验，不真正推送
-- 去掉了没实际用到的 `buildx`
-- 自动规范化镜像名
-- 保留源 registry 信息，降低不同镜像源撞名风险
-- 目标镜像已存在时自动跳过
-- 同步失败自动重试
-- 生成日志和 `GitHub Actions Summary`
-- 上传 `logs/` 作为 artifact
+当前已经整理好的自定义镜像包括：
+
+- `SAP Kafka Connect HANA`
+- `SeaTunnel 独立项目`
+
+其中 SeaTunnel 相关文件已经单独放到：
+
+- `custom-images/seatunnel-stack/`
+
+### SeaTunnel 版本策略
+
+如果目标是：
+
+- 尽量走 `SeaTunnel Web`
+- 还要稳定
+- 还要适配私有 K8s 集群上的 `AMD` / `ARM`
+
+当前建议先走官方稳定兼容组合：
+
+- `SeaTunnel Engine 2.3.8`
+- `SeaTunnel Web 1.0.2`
+
+原因是：
+
+- 官方 `SeaTunnel` 主线 release 比它更新
+- 但 `SeaTunnel Web` 官方公开 release 目前还是 `1.0.2`
+- 兼容表里明确给出的稳定组合，是 `2.3.8 + 1.0.2`
+
+### SeaTunnel 多架构构建 workflow
+
+对应 workflow：
+
+- `.github/workflows/build-seatunnel-images.yml`
+
+支持：
+
+- `linux/amd64`
+- `linux/arm64`
+
+支持构建目标：
+
+- `seatunnel`
+- `seatunnel_hana`
+- `seatunnel_hana_jdbcplus`
+- `seatunnel_web`
+- `seatunnel_web_jdbcplus`
+- `seatunnel_web_jdbcplus_hana`
+
+支持手动触发：
+
+- `all`
+- `seatunnel`
+- `seatunnel_hana`
+- `seatunnel_hana_jdbcplus`
+- `seatunnel_web`
+- `seatunnel_web_jdbcplus`
+- `seatunnel_web_jdbcplus_hana`
+
+### SeaTunnel 镜像说明
+
+- `custom-images/seatunnel-stack/apache-seatunnel/`
+  - SeaTunnel Engine 基础镜像
+- `custom-images/seatunnel-stack/apache-seatunnel-hana/`
+  - 在 Engine 基础上加入 `ngdbc.jar`
+- `custom-images/seatunnel-stack/apache-seatunnel-hana-jdbcplus/`
+  - 在 HANA Engine 基础上继续加入 MySQL / Oracle / SQLServer JDBC 驱动
+- `custom-images/seatunnel-stack/seatunnel-web/`
+  - SeaTunnel Web 镜像，内置 Engine 运行库与 `plugin-mapping.properties`
+- `custom-images/seatunnel-stack/seatunnel-web-jdbcplus/`
+  - SeaTunnel Web JDBCPlus 镜像，额外带 MySQL / Oracle / SQLServer Web datasource
+- `custom-images/seatunnel-stack/seatunnel-web-jdbcplus-hana/`
+  - SeaTunnel Web HANA 可视化版，额外带 HANA datasource 与 `ngdbc.jar`
+
+这些镜像都采用“workflow 自动下载官方安装包”的方式，不把大体积二进制包直接塞进 Git 仓库里，后续维护更轻。
+
+## 命名规则说明
+
+完整名同步层会保留源 registry 信息并做扁平化，例如：
+
+```text
+busybox:1.36
+-> registry.cn-guangzhou.aliyuncs.com/tools_y/docker-io_library_busybox:1.36
+
+registry.k8s.io/sig-storage/snapshot-controller:v6.3.3
+-> registry.cn-guangzhou.aliyuncs.com/tools_y/registry-k8s-io_sig-storage_snapshot-controller:v6.3.3
+```
+
+别名发布层再给你一份更短的名字，例如：
+
+```text
+docker.io/library/mysql:5.7
+-> registry.cn-guangzhou.aliyuncs.com/tools_y/docker-io_library_mysql:5.7
+-> registry.cn-guangzhou.aliyuncs.com/tools_y/mysql:5.7
+```
 
 ## 使用方式
 
-### 方式一：改 image-list.txt 后直接 push 到 main
+### 方式一：改文件后直接 push 到 main
 
 ```bash
-git add image-list.txt
-git commit -m "Update image-list.txt"
+git add image-list.txt image-alias.txt
+git commit -m "Update image sync config"
 git push
 ```
 
@@ -81,20 +219,28 @@ git push
 - 选择 `Sync Images to Aliyun`
 - 点击 `Run workflow`
 
-## 命名规则说明
+推荐这样用：
 
-为了减少不同源镜像撞名，目标镜像会保留源 registry 信息并做扁平化，例如：
+- 只想同步完整名仓库：`sync_only`
+- 今天完整名已经同步好了，只想再推一份短名字：`alias_only`
+- 两层都一起跑：`sync_and_alias`
 
-```text
-busybox:1.36
--> registry.cn-guangzhou.aliyuncs.com/tools_y/docker-io_library_busybox:1.36
+## 这版 workflow 的增强点
 
-registry.k8s.io/sig-storage/snapshot-controller:v6.3.3
--> registry.cn-guangzhou.aliyuncs.com/tools_y/registry-k8s-io_sig-storage_snapshot-controller:v6.3.3
-```
+- `PR` 只做校验，不真正推送
+- 自动规范化镜像名
+- 保留源 registry 信息，降低撞名风险
+- 完整名镜像已存在时自动跳过
+- 同步失败自动重试
+- 支持 `image-alias.txt` 别名发布
+- 支持手动选择 `sync_only` / `alias_only`
+- 别名发布直接在阿里云仓库内部复制，通常比重新拉外网更快
+- 生成日志和 `GitHub Actions Summary`
+- 上传 `logs/` 作为 artifact
 
 ## 建议
 
 - `MAX_PARALLEL` 先保持 `4`
-- 如果后面发现经常被限流，再降到 `3`
-- 如果镜像越来越多，建议把 `image-list.txt` 按业务分类写注释，后面更好维护
+- 如果经常被限流，再降到 `3`
+- 完整名同步层不要截断，保持唯一性
+- 正式私有仓库用 `image-alias.txt` 发短名字，更适合日常使用
