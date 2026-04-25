@@ -36,6 +36,22 @@
 - 多架构构建仓
 - 阿里云镜像发布仓
 
+源码主责任建议放在：
+
+- `seatunnel-engine-custom`
+- `seatunnel-web-custom`
+
+也就是说，这个目录回答的是：
+
+- 怎么统一构建
+- 怎么统一发版
+- 怎么把镜像推到阿里云
+
+而不是：
+
+- Web 页面源码从哪里继续改
+- Engine 方言从哪里继续修
+
 如果后面 `SeaTunnel Engine` 和 `SeaTunnel Web` 还要继续长期二开，建议把源码主责任拆出去：
 
 - `Engine` 独立一个私有 GitHub 项目
@@ -46,3 +62,12 @@
 - `custom-images/seatunnel-stack/` 可以继续保留
 - 但更适合承接发布和 buildx
 - 不建议继续长期充当 `Engine` 和 `Web` 的唯一源码主仓
+
+## 继续开发时的最短路径
+
+1. 先在源码仓改：
+   - `seatunnel-web-custom`
+   - `seatunnel-engine-custom`
+2. 本地验证构建通过
+3. 再把发布所需 patch / 版本 / README 同步到这里
+4. 最后用 GitHub Actions 发版

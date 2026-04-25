@@ -115,6 +115,22 @@ docker.io/library/mysql:5.7 => registry.cn-guangzhou.aliyuncs.com/tools_y_privat
 
 - `custom-images/seatunnel-stack/`
 
+这里要特别区分两个角色：
+
+- `seatunnel-web-custom`
+  - 是 `Web` 的源码主仓
+  - 负责页面、datasource、配置生成、源码级二开
+- `images-sysncer`
+  - 是发布仓 / buildx 仓
+  - 负责 GitHub Actions、多架构构建、阿里云推送
+
+也就是说：
+
+- 先在源码主仓改
+- 再把“发布需要的 patch / 版本 / README”同步回这个仓
+
+不要反过来把这个仓当成唯一源码入口。
+
 ### SeaTunnel 版本策略
 
 如果目标是：
@@ -178,6 +194,24 @@ docker.io/library/mysql:5.7 => registry.cn-guangzhou.aliyuncs.com/tools_y_privat
   - SeaTunnel Web JDBCPlus 镜像，额外带 MySQL / Oracle / SQLServer Web datasource
 - `custom-images/seatunnel-stack/seatunnel-web-jdbcplus-hana/`
   - SeaTunnel Web HANA 可视化版，额外带 HANA datasource 与 `ngdbc.jar`
+
+### 当前 SeaTunnel Web 已做过的关键增强
+
+这套构建链当前已经覆盖的核心增强包括：
+
+- `JDBC-Hana` datasource
+- `seatunnel-datasource-client` 补齐后的 datasource 枚举
+- `StarRocks JDBC Url` 数据库路径拼接修复
+- `StarRocks` sink `Target Table` 手工输入
+- `StarRocks` sink 识别条件放宽，不再只认精确值 `StarRocks`
+- Web 镜像内带 `/opt/seatunnel`、`plugin-mapping.properties` 和运行库
+
+如果后面你在 `seatunnel-web-custom` 又做了新的页面能力或源码修补，记得同步回来至少这几处：
+
+- `custom-images/seatunnel-stack/seatunnel-web-jdbcplus-hana/patches/0001-seatunnel-web-hana-ui.patch`
+- `custom-images/seatunnel-stack/*/versions.env`
+- `custom-images/seatunnel-stack/*/README.md`
+- 本仓根 README
 
 这些镜像都采用“workflow 自动下载官方安装包”的方式，不把大体积二进制包直接塞进 Git 仓库里，后续维护更轻。
 
