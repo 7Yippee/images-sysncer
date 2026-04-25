@@ -28,6 +28,11 @@
 - `ngdbc 2.10.14`
 - 多架构：`linux/amd64`、`linux/arm64`
 
+## 先看这里
+
+- [00-SeaTunnel 发布导航与补丁同步说明.md](./00-SeaTunnel%20发布导航与补丁同步说明.md)
+- Web 源码主仓：[7Yippee/seatunnel-web-custom](https://github.com/7Yippee/seatunnel-web-custom)
+
 ## 长期维护建议
 
 当前这个目录更适合作为：

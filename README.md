@@ -131,6 +131,11 @@ docker.io/library/mysql:5.7 => registry.cn-guangzhou.aliyuncs.com/tools_y_privat
 
 不要反过来把这个仓当成唯一源码入口。
 
+如果你是第一次接手 SeaTunnel 这套自定义镜像，建议先看：
+
+- [custom-images/seatunnel-stack/00-SeaTunnel 发布导航与补丁同步说明.md](./custom-images/seatunnel-stack/00-SeaTunnel%20发布导航与补丁同步说明.md)
+- Web 源码主仓：[7Yippee/seatunnel-web-custom](https://github.com/7Yippee/seatunnel-web-custom)
+
 ### SeaTunnel 版本策略
 
 如果目标是：

@@ -2,6 +2,11 @@
 
 这个目录用于构建一版面向 `HANA -> StarRocks` 可视化维护场景的 `SeaTunnel Web` 镜像。
 
+如果你要继续改页面逻辑、datasource 逻辑或配置生成逻辑，优先去源码主仓：
+
+- [7Yippee/seatunnel-web-custom](https://github.com/7Yippee/seatunnel-web-custom)
+- [发布导航与补丁同步说明](../00-SeaTunnel%20发布导航与补丁同步说明.md)
+
 在现有 `JDBCPlus` 版本基础上，额外加入：
 
 - `datasource-jdbc-hana`
