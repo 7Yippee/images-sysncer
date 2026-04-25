@@ -609,3 +609,119 @@ index 00000000..687eadff
 +        return DriverManager.getConnection(requestParams.get(HanaOptionRule.URL.key()), info);
 +    }
 +}
+
+diff --git a/seatunnel-ui/src/views/task/synchronization-definition/dag/configuration-form.tsx b/seatunnel-ui/src/views/task/synchronization-definition/dag/configuration-form.tsx
+index 2554870..1a52e20 100644
+--- a/seatunnel-ui/src/views/task/synchronization-definition/dag/configuration-form.tsx
++++ b/seatunnel-ui/src/views/task/synchronization-definition/dag/configuration-form.tsx
+@@ -37,9 +37,11 @@ import {
+ } from './use-configuration-form'
+ import { useI18n } from 'vue-i18n'
+ import type { NodeType } from './types'
+-
+ import { debounce } from 'lodash'
+ 
++const isStarRocksValue = (value: unknown) =>
++  typeof value === 'string' && value.toLowerCase().includes('starrocks')
++
+ const ConfigurationForm = defineComponent({
+   name: 'ConfigurationForm',
+   props: {
+@@ -72,17 +74,21 @@ const ConfigurationForm = defineComponent({
+     const { t } = useI18n()
+     const formRef = ref()
+     const transfer = ref()
++    const isManualSinkTableInput = () =>
++      dagStore.getDagInfo.jobType === 'DATA_INTEGRATION' &&
++      props.nodeType === 'sink' &&
++      (isStarRocksValue(state.model.pluginName) ||
++        isStarRocksValue(state.model.datasourceName) ||
++        isStarRocksValue(state.model.datasourceInstanceName))
+ 
+     const onTableChange = (tableName: any) => {
+       state.model.tableName = tableName
+       emit('tableNameChange', state.model)
+     }
+ 
+-    
+-    const prevQueryTableName = ref('');
++    const prevQueryTableName = ref('')
+     const onTableSearch = debounce((tableName: any) => {
+-      // rely on database
+-      if(state.model.database && prevQueryTableName.value !== tableName) {
++      if (state.model.database && prevQueryTableName.value !== tableName) {
+         getTableOptions(state.model.database, tableName)
+         prevQueryTableName.value = tableName
+       }
+@@ -205,16 +211,28 @@ const ConfigurationForm = defineComponent({
+                 label={t('project.synchronization_definition.table_name')}
+                 path='tableName'
+               >
+-                <NSelect
+-                  filterable
+-                  loading={state.tableLoading}
+-                  options={state.tableOptions}
+-                  v-model={[state.model.tableName, 'value']}
+-                  onUpdateValue={onTableChange}
+-                  onSearch={onTableSearch}
+-                  remote
+-                  virtualScroll
++                {isManualSinkTableInput() ? (
++                  <NInput
++                    clearable
++                    value={
++                      typeof state.model.tableName === 'string'
++                        ? state.model.tableName
++                        : ''
++                    }
++                    onUpdateValue={onTableChange}
+                   />
++                ) : (
++                  <NSelect
++                    filterable
++                    loading={state.tableLoading}
++                    options={state.tableOptions}
++                    v-model={[state.model.tableName, 'value']}
++                    onUpdateValue={onTableChange}
++                    onSearch={onTableSearch}
++                    remote
++                    virtualScroll
++                  />
++                )}
+               </NFormItem>
+             )}
+ 
+diff --git a/seatunnel-ui/src/views/task/synchronization-definition/dag/use-node-setting.ts b/seatunnel-ui/src/views/task/synchronization-definition/dag/use-node-setting.ts
+index 62f1b7d..bb0a3df 100644
+--- a/seatunnel-ui/src/views/task/synchronization-definition/dag/use-node-setting.ts
++++ b/seatunnel-ui/src/views/task/synchronization-definition/dag/use-node-setting.ts
+@@ -25,6 +25,9 @@ import { useRoute } from 'vue-router'
+ import { useI18n } from 'vue-i18n'
+ import type { ModelRecord } from './types'
+ 
++const isStarRocksValue = (value: unknown) =>
++  typeof value === 'string' && value.toLowerCase().includes('starrocks')
++
+ export function useNodeSettingModal(
+   props: any,
+   ctx: SetupContext<('cancelModal' | 'confirmModal')[]>
+@@ -302,6 +305,11 @@ export function useNodeSettingModal(
+ 
+   const handleChangeTable = async (node: any) => {
+     if (!modelRef.value) return
++    const isManualStarRocksSinkTarget =
++      props.nodeInfo.type === 'sink' &&
++      (isStarRocksValue(node.pluginName) ||
++        isStarRocksValue(node.datasourceName) ||
++        isStarRocksValue(node.datasourceInstanceName))
+     const currentTable = _.isArray(node.tableName)
+       ? node.tableName[0]
+       : node.tableName
+@@ -311,6 +319,7 @@ export function useNodeSettingModal(
+       : node.database
+ 
+     if (!currentTable) return
++    if (isManualStarRocksSinkTarget) return
+ 
+     const result = await getInputTableSchema(
+       node.datasourceInstanceId,
