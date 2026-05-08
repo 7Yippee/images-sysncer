@@ -5,32 +5,42 @@
 当前包含：
 
 - `apache-seatunnel/`
-- `apache-seatunnel-hana/`
-- `apache-seatunnel-hana-jdbcplus/`
+- `dockerfiles/`
 - `seatunnel-web/`
 - `seatunnel-web-jdbcplus/`
-- `seatunnel-web-jdbcplus-hana/`
 
 适用场景：
 
 - `SeaTunnel Engine`
-- `SAP HANA -> SeaTunnel`
 - `SeaTunnel Web`
+- `SeaTunnel Web JDBCPlus`
 
 对应的 GitHub Actions workflow：
 
 - `.github/workflows/build-seatunnel-images.yml`
 
+其中 `seatunnel-web`、`seatunnel-web-jdbcplus` 两个 Web 变体共用：
+
+- `dockerfiles/seatunnel-web.Dockerfile`
+
+两者的差异不在 Dockerfile 本身，而在各自目录里的 `versions.env` 以及下载/编译出来的 `dist/` 内容。
+
+如果本地手工调试 Web 镜像，需要显式指定共享 Dockerfile，例如：
+
+```bash
+docker build \
+  -f custom-images/seatunnel-stack/dockerfiles/seatunnel-web.Dockerfile \
+  custom-images/seatunnel-stack/seatunnel-web
+```
+
 当前默认版本策略：
 
 - `SeaTunnel Engine 2.3.8`
 - `SeaTunnel Web 1.0.2`
-- `ngdbc 2.10.14`
 - 多架构：`linux/amd64`、`linux/arm64`
 
-## 先看这里
+## 源码主仓
 
-- [00-SeaTunnel 发布导航与补丁同步说明.md](./00-SeaTunnel%20发布导航与补丁同步说明.md)
 - Web 源码主仓：[7Yippee/seatunnel-web-custom](https://github.com/7Yippee/seatunnel-web-custom)
 
 ## 长期维护建议
