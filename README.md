@@ -1,20 +1,13 @@
 # images-sysncer
 
-容器镜像管理仓库，包含两大功能：
-
-1. **镜像同步** — 把公网镜像搬运到阿里云私有仓库
-2. **自定义构建** — 从 Dockerfile 构建私有镜像并推送
+容器镜像同步仓库：把公网镜像搬运到阿里云私有仓库。
 
 ## 目录结构
 
 ```text
 images-sysncer/
 ├── .github/workflows/
-│   ├── sync-image.yml                    # 镜像同步 workflow
-│   └── build-seatunnel-images.yml        # SeaTunnel 构建
-├── custom-images/                        # 自定义镜像构建区
-│   ├── README.md                         # 构建区说明
-│   └── seatunnel-stack/                  # SeaTunnel 全套镜像
+│   └── sync-image.yml                    # 镜像同步 workflow
 ├── image-list.txt                        # 需要同步的镜像清单
 ├── image-alias.txt                       # 别名发布映射表
 └── README.md
@@ -22,7 +15,7 @@ images-sysncer/
 
 ---
 
-## 一、镜像同步
+## 镜像同步
 
 ### 工作原理
 
@@ -86,22 +79,7 @@ registry.k8s.io/sig-storage/snapshot-controller:v6.3.3
 
 ---
 
-## 二、自定义镜像构建
-
-详细说明见 [custom-images/README.md](./custom-images/README.md)。
-
-### SeaTunnel Stack
-
-Apache SeaTunnel 数据集成平台镜像（Engine + Web），支持多架构。
-
-- Workflow: `build-seatunnel-images.yml`
-- 详情: [custom-images/seatunnel-stack/README.md](./custom-images/seatunnel-stack/README.md)
-
-> **注意**: 本仓库是 SeaTunnel 的**发布仓**，不是源码主仓。源码修改请去 [7Yippee/seatunnel-web-custom](https://github.com/7Yippee/seatunnel-web-custom)。
-
----
-
-## 三、配置
+## 配置
 
 ### 必需的 Secrets
 
