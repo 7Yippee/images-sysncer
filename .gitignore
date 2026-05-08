@@ -1,5 +1,8 @@
 .DS_Store
+.claude/
+.idea/
+.vscode/
+*.log
 custom-images/**/target/
 custom-images/**/dist/
 custom-images/**/downloads/
-

@@ -7,6 +7,7 @@
 - `apache-seatunnel/`
 - `apache-seatunnel-hana/`
 - `apache-seatunnel-hana-jdbcplus/`
+- `dockerfiles/`
 - `seatunnel-web/`
 - `seatunnel-web-jdbcplus/`
 - `seatunnel-web-jdbcplus-hana/`
@@ -20,6 +21,20 @@
 对应的 GitHub Actions workflow：
 
 - `.github/workflows/build-seatunnel-images.yml`
+
+其中 `seatunnel-web`、`seatunnel-web-jdbcplus`、`seatunnel-web-jdbcplus-hana` 三个 Web 变体共用：
+
+- `dockerfiles/seatunnel-web.Dockerfile`
+
+三者的差异不在 Dockerfile 本身，而在各自目录里的 `versions.env`、下载/编译出来的 `dist/` 内容，以及 HANA 变体使用的 patch。
+
+如果本地手工调试 Web 镜像，需要显式指定共享 Dockerfile，例如：
+
+```bash
+docker build \
+  -f custom-images/seatunnel-stack/dockerfiles/seatunnel-web.Dockerfile \
+  custom-images/seatunnel-stack/seatunnel-web
+```
 
 当前默认版本策略：
 

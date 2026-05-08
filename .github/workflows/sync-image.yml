@@ -89,6 +89,7 @@ jobs:
           }
 
           invalid=0
+          declare -A image_sources=()
 
           if [[ ! -f "${IMAGE_LIST_FILE}" ]]; then
             echo "Missing ${IMAGE_LIST_FILE}"
@@ -104,6 +105,13 @@ jobs:
             if ! validate_ref "image-list" "$line_no" "$line"; then
               invalid=1
             fi
+
+            if [[ -n "${image_sources[$line]:-}" ]]; then
+              echo "image-list line ${line_no}: duplicate image, first seen on line ${image_sources[$line]} -> $line"
+              invalid=1
+            fi
+
+            image_sources["$line"]="$line_no"
           done < "${IMAGE_LIST_FILE}"
 
           if [[ -f "${ALIAS_LIST_FILE}" ]]; then
@@ -130,6 +138,11 @@ jobs:
               fi
 
               if ! validate_ref "alias target" "$alias_line_no" "$target_part"; then
+                invalid=1
+              fi
+
+              if [[ -z "${image_sources[$source_part]:-}" ]]; then
+                echo "alias line ${alias_line_no}: source is not present in ${IMAGE_LIST_FILE} -> $source_part"
                 invalid=1
               fi
 
