@@ -11,11 +11,9 @@
 images-sysncer/
 ├── .github/workflows/
 │   ├── sync-image.yml                    # 镜像同步 workflow
-│   ├── build-sap-kafka-connect-hana.yml  # SAP Kafka Connect 构建
-│   └── build-seatunnel-images.yml        # SeaTunnel 全套构建
+│   └── build-seatunnel-images.yml        # SeaTunnel 构建
 ├── custom-images/                        # 自定义镜像构建区
 │   ├── README.md                         # 构建区说明
-│   ├── sap-kafka-connect-hana/           # SAP HANA Kafka Connect
 │   └── seatunnel-stack/                  # SeaTunnel 全套镜像
 ├── image-list.txt                        # 需要同步的镜像清单
 ├── image-alias.txt                       # 别名发布映射表
@@ -92,20 +90,12 @@ registry.k8s.io/sig-storage/snapshot-controller:v6.3.3
 
 详细说明见 [custom-images/README.md](./custom-images/README.md)。
 
-### SAP Kafka Connect HANA
-
-带 SAP HANA Connector 的 Kafka Connect 镜像。
-
-- Workflow: `build-sap-kafka-connect-hana.yml`
-- 详情: [custom-images/sap-kafka-connect-hana/README.md](./custom-images/sap-kafka-connect-hana/README.md)
-
 ### SeaTunnel Stack
 
-Apache SeaTunnel 数据集成平台全套镜像（Engine + Web，共 6 个变体），支持多架构。
+Apache SeaTunnel 数据集成平台镜像（Engine + Web），支持多架构。
 
 - Workflow: `build-seatunnel-images.yml`
 - 详情: [custom-images/seatunnel-stack/README.md](./custom-images/seatunnel-stack/README.md)
-- 发布导航: [00-SeaTunnel 发布导航与补丁同步说明.md](./custom-images/seatunnel-stack/00-SeaTunnel%20发布导航与补丁同步说明.md)
 
 > **注意**: 本仓库是 SeaTunnel 的**发布仓**，不是源码主仓。源码修改请去 [7Yippee/seatunnel-web-custom](https://github.com/7Yippee/seatunnel-web-custom)。
 

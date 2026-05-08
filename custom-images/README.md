@@ -8,8 +8,7 @@
 
 ```text
 custom-images/
-├── sap-kafka-connect-hana/      # SAP HANA Kafka Connect 镜像
-└── seatunnel-stack/             # SeaTunnel 全套镜像（Engine + Web，共 6 个变体）
+└── seatunnel-stack/             # SeaTunnel 镜像（Engine + Web）
 ```
 
 ## 与镜像同步的区别
@@ -19,15 +18,9 @@ custom-images/
 | 做什么 | 把外部公网镜像搬到阿里云 | 从 Dockerfile 构建私有镜像 |
 | 触发方式 | 修改 `image-list.txt` / `image-alias.txt` | 修改 `custom-images/` 下的文件 |
 | 工具 | `skopeo copy` | `docker buildx` |
-| 对应 workflow | `sync-image.yml` | `build-sap-kafka-connect-hana.yml` / `build-seatunnel-images.yml` |
+| 对应 workflow | `sync-image.yml` | `build-seatunnel-images.yml` |
 
 ## 当前包含的自定义镜像
-
-### SAP Kafka Connect HANA
-
-- 路径: `sap-kafka-connect-hana/`
-- 用途: 带 SAP HANA Connector 的 Kafka Connect 镜像
-- Workflow: `.github/workflows/build-sap-kafka-connect-hana.yml`
 
 ### SeaTunnel Stack
 
