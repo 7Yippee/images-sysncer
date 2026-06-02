@@ -40,3 +40,5 @@ eclipse-temurin:21-jdk
 # -----------------------------------------------------------------------------
 yidadaa/chatgpt-next-web:latest
 ccr.ccs.tencentyun.com/looloodebug/looloodebug
+
+kkwentus/sqlserver2005
