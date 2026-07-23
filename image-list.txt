@@ -48,4 +48,4 @@ docker.elastic.co/logstash/logstash:8.19.0
 yidadaa/chatgpt-next-web:latest
 ccr.ccs.tencentyun.com/looloodebug/looloodebug
 
-kkwentus/sqlserver2005
+kkwentus/sqlserver2005:latest
