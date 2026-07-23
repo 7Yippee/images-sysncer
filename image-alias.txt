@@ -49,5 +49,3 @@ yidadaa/chatgpt-next-web:latest => chatgpt-next-web:latest
 
 
 ccr.ccs.tencentyun.com/looloodebug/looloodebug => looloodebug:latest
-
-docker.io/kkwentus/sqlserver2005:latest => sqlserver2005:latest
