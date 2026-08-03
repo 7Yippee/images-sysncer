@@ -10,6 +10,14 @@
 docker.io/library/mysql:5.7
 
 # -----------------------------------------------------------------------------
+# Oracle CDC PoC
+# -----------------------------------------------------------------------------
+docker.io/gvenzl/oracle-free:23.26.2-slim-faststart
+quay.io/debezium/connect:3.6.0.Final
+docker.io/library/flink:1.20.5-scala_2.12-java17
+docker.io/starrocks/allin1-ubuntu:3.5.20
+
+# -----------------------------------------------------------------------------
 # 服务网格 (Istio / Kiali)
 # -----------------------------------------------------------------------------
 rancher/mirrored-kiali-kiali:v2.1.0

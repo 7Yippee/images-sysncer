@@ -68,6 +68,8 @@ jobs:
             local kind="$1"
             local line_no="$2"
             local ref="$3"
+            local name_part="$ref"
+            local last_segment
             local has_error=0
 
             if [[ -z "$ref" ]]; then
@@ -80,8 +82,15 @@ jobs:
               has_error=1
             fi
 
-            if [[ "$ref" =~ [A-Z] ]]; then
-              echo "${kind} line ${line_no}: contains uppercase characters -> $ref"
+            last_segment="${ref##*/}"
+            if [[ "$ref" == *"@sha256:"* ]]; then
+              name_part="${ref%@sha256:*}"
+            elif [[ "$last_segment" == *":"* ]]; then
+              name_part="${ref%:*}"
+            fi
+
+            if [[ "$name_part" =~ [A-Z] ]]; then
+              echo "${kind} line ${line_no}: repository path contains uppercase characters -> $ref"
               has_error=1
             fi
 
