@@ -1,0 +1,59 @@
+name: Expense middleware 20260908
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/expense-20260908.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: expense-middleware-20260908
+  cancel-in-progress: false
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Install skopeo
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+      - name: Authenticate to existing ACR namespace
+        uses: docker/login-action@v3
+        with:
+          registry: registry.cn-guangzhou.aliyuncs.com
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Copy only approved linux amd64 manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          authfile="$HOME/.docker/config.json"
+          mkdir -p logs
+          sync_one() {
+            local source="$1" target="$2" expected="$3" actual error rc
+            error="$(mktemp)"
+            if actual=$(skopeo inspect --authfile "$authfile" --format '{{.Digest}}' "docker://$target" 2>"$error"); then
+              test "$actual" = "$expected" || { echo "REFUSED_DIFFERENT_DIGEST $target"; return 1; }
+              printf 'SKIPPED_SAME_DIGEST %s %s\n' "$target" "$actual" | tee -a logs/result.txt
+              return 0
+            else
+              rc=$?
+              if ! grep -Eqi 'manifest unknown|name unknown' "$error"; then
+                echo "TARGET_INSPECT_FAILED $target rc=$rc"
+                return 1
+              fi
+            fi
+            skopeo copy --retry-times 3 --preserve-digests --authfile "$authfile" \
+              "docker://$source@$expected" "docker://$target"
+            actual=$(skopeo inspect --authfile "$authfile" --format '{{.Digest}}' "docker://$target")
+            test "$actual" = "$expected"
+            test "$(skopeo inspect --authfile "$authfile" --format '{{.Os}}/{{.Architecture}}' "docker://$target")" = linux/amd64
+            printf 'COPIED_AND_VERIFIED %s %s\n' "$target" "$actual" | tee -a logs/result.txt
+          }
+          sync_one docker.io/apache/kafka registry.cn-guangzhou.aliyuncs.com/tools_y/kafka:3.9.2 sha256:f5f8605794dce59d1d566f63667682771c2fec9e96088b0d6a5ef0f8476dd4b2
+          sync_one docker.io/library/zookeeper registry.cn-guangzhou.aliyuncs.com/tools_y/zookeeper:3.9.5 sha256:314879019009bec3b488fd7d675242ffdc13b7410bbe4f6dc6aac70fb700a53e
+      - name: Save results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: expense-20260908-results
+          path: logs/
