@@ -1,5 +1,8 @@
 name: Redis legacy 6.2.16 for expense
 on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/redis-legacy-20260908.yml]
   workflow_dispatch:
 permissions: {contents: read}
 jobs:
