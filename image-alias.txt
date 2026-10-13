@@ -58,3 +58,9 @@ yidadaa/chatgpt-next-web:latest => chatgpt-next-web:latest
 
 
 ccr.ccs.tencentyun.com/looloodebug/looloodebug => looloodebug:latest
+
+# -----------------------------------------------------------------------------
+# Confluent Schema Registry
+# -----------------------------------------------------------------------------
+docker.io/confluentinc/cp-schema-registry:7.6.0 => cp-schema-registry:7.6.0
+
